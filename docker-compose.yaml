@@ -1,0 +1,15 @@
+services:
+    database:
+      container_name: database
+      image: postgres:17.2
+      environment:
+        POSTGRES_USER: stock
+        POSTGRES_PASSWORD: stockpass
+      ports:
+        - "127.0.0.1:5432:5432"
+      restart: always
+      volumes:
+          - db_data:/var/lib/postgresql/data
+volumes:
+  db_data:
+    driver: local
