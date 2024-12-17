@@ -7,7 +7,9 @@ import sys
 import json
 import pathlib
 
+import models
 from database.manager import DatabaseManager
+from sqlalchemy.sql import Insert
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)  # Set the logger level to INFO
@@ -42,7 +44,7 @@ def get_symbols() -> list:
 
 class Scraper:
     base_url = "https://www.nasdaq.com/market-activity/stocks/"
-    symbols_data: list[dict] | None = None
+    symbols_data: list[list[dict]] | None = None
 
     def get_symbols(self):
         self.symbols_data = get_symbols()
@@ -58,9 +60,17 @@ if __name__ == "__main__":
         logger.critical("empty DB_URL environment variable")
     db_manager = DatabaseManager(os.environ["DB_URL"], str(alembic_config_path))
     conn = db_manager.get_connection()
-    conn.close()
     scraper = Scraper()
     scraper.get_symbols()
-    with open("data.json", "w") as json_file:
-        json.dump(scraper.symbols_data, json_file, indent=4)
+    with conn:
+        for symbol_list in scraper.symbols_data:
+            for symbol in symbol_list:
+                insert_stmt = Insert(models.stock).values(
+                    symbol=symbol.get("s"),
+                    name=symbol.get("n"),
+                    industry=symbol.get("industry"),
+                    marketcap=symbol.get("marketCap")
+                )
+                conn.execute(insert_stmt)
+                conn.commit()
     db_manager.close()

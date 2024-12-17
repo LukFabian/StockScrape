@@ -1,16 +1,20 @@
-from sqlalchemy import create_engine, MetaData, Table, Column, String, text
-from sqlalchemy.schema import CreateSchema
+import uuid
+
+from sqlalchemy import create_engine, MetaData, Table, Column, String, text, DOUBLE_PRECISION
+from sqlalchemy.dialects.postgresql import UUID
 
 metadata = MetaData()
 
 # Table definition
 stock = Table(
-    "stock",
+    "stocks",
     metadata,
-    Column("symbol", String, primary_key=True),
+    Column("uuid", UUID, primary_key=True, unique=True, default=uuid.uuid4, nullable=False),
+    Column("symbol", String, unique=True),
     Column("name", String, nullable=False),
-    Column("industry", String, nullable=False),
-    schema="stockanalysis"
+    Column("industry", String),
+    Column("marketcap", DOUBLE_PRECISION, nullable=False),
+    schema="public"
 )
 
 if __name__ == "__main__":

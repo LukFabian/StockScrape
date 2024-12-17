@@ -22,9 +22,10 @@ def upgrade() -> None:
     op.create_table(
         'stocks',
         sa.Column('uuid', UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False),
+        sa.Column('symbol', sa.VARCHAR(), nullable=False, unique=True),
         sa.Column('name', sa.VARCHAR(), nullable=False),
-        sa.Column('industry', sa.VARCHAR(), nullable=False),
-        sa.Column('marketcap', sa.BIGINT(), nullable=False),
+        sa.Column('industry', sa.VARCHAR()),
+        sa.Column('marketcap', sa.DOUBLE_PRECISION(), nullable=False),
     )
 
 
