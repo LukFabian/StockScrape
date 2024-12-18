@@ -1,3 +1,5 @@
+import pathlib
+
 import sqlalchemy
 from sqlalchemy import create_engine, Connection
 from sqlalchemy.orm import sessionmaker
@@ -12,7 +14,7 @@ class DatabaseManager:
     is at the latest Alembic migration version.
     """
 
-    def __init__(self, db_url: str, alembic_config_path: str):
+    def __init__(self, db_url: str, alembic_config_path: str | pathlib.Path):
         """
         Initialize the DatabaseManager.
 
