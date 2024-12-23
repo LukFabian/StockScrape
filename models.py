@@ -1,26 +1,25 @@
-import uuid
+from sqlalchemy import Column, String, Boolean, Double, BigInteger, Date, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
 
-from sqlalchemy import create_engine, MetaData, Table, Column, String, text, DOUBLE_PRECISION
-from sqlalchemy.dialects.postgresql import UUID
+Base = declarative_base()
 
-metadata = MetaData()
 
-# Table definition
-stock = Table(
-    "stocks",
-    metadata,
-    Column("uuid", UUID, primary_key=True, unique=True, default=uuid.uuid4, nullable=False),
-    Column("symbol", String, unique=True),
-    Column("name", String, nullable=False),
-    Column("industry", String),
-    Column("marketcap", DOUBLE_PRECISION, nullable=False),
-    schema="public"
-)
+class Stock(Base):
+    __tablename__ = "stock"
+    symbol = Column(String, nullable=False, primary_key=True)
+    name = Column(String, nullable=False)
+    industry = Column(String)
+    marketcap = Column(Double, nullable=False)
+    isNasdaq100 = Column(Boolean)
+    deltaIndicator = Column(String)
 
-if __name__ == "__main__":
-    # Replace with your connection details
-    engine = create_engine("postgresql+psycopg2://stock:stockpass@127.0.0.1/StockAnalysis")
 
-    # Create the database
-    with engine.connect() as connection:
-        connection.execute(text('CREATE DATABASE "StockAnalysis" OWNER "user";'))
+class Chart(Base):
+    __tablename__ = "chart"
+    high = Column(BigInteger, nullable=False)
+    low = Column(BigInteger, nullable=False)
+    open = Column(BigInteger, nullable=False)
+    close = Column(BigInteger, nullable=False)
+    volume = Column(BigInteger, nullable=False)
+    date = Column(Date, primary_key=True)
+    symbol = Column(String, ForeignKey("stock.symbol"), primary_key=True)
