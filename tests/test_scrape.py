@@ -4,7 +4,7 @@ from unittest import TestCase
 from scrape.symbols import format_to_bigint
 
 
-class Test(TestCase):
+class TestFormatToBigint(TestCase):
     def test_valid_float_input(self):
         self.assertEqual(format_to_bigint(123.45), "12345")
         self.assertEqual(format_to_bigint(0.01), "1")
