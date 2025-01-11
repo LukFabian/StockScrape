@@ -2,10 +2,15 @@ import pathlib
 
 import sqlalchemy
 from sqlalchemy import create_engine, Connection
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from alembic.runtime.migration import MigrationContext
+
+
+# Helper function to convert a query result row to a dictionary
+def row_to_dict(row):
+    return {column.key: getattr(row, column.key) for column in row.__table__.columns}
 
 
 class DatabaseManager:
@@ -90,6 +95,9 @@ class DatabaseManager:
         """
         return self.engine.connect()
 
+    def get_session(self) -> Session:
+        return Session(bind=self.engine)
+
     def close(self):
         """
         Closes the SQLAlchemy engine.
@@ -97,4 +105,3 @@ class DatabaseManager:
         if self.engine:
             self.engine.dispose()
             print("[INFO] Database connection closed.")
-

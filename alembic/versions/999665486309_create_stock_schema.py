@@ -5,9 +5,7 @@ Revises:
 Create Date: 2024-12-17 16:03:37.860075
 
 """
-import uuid
 from typing import Sequence, Union
-from sqlalchemy.dialects.postgresql import UUID
 from alembic import op
 import sqlalchemy as sa
 
