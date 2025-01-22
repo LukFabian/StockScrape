@@ -95,9 +95,9 @@ def calculate_smoothed_directional_indexes(high: List[int], low: List[int], peri
         negative_dx_list.append(negative_dx)
     smooth_positive_dx = list()
     smooth_negative_dx = list()
-    for i in range(period, len(positive_dx_list)):
-        smooth_positive_dx.append(statistics.fmean(positive_dx_list[i - period: i]))
-        smooth_negative_dx.append(statistics.fmean(negative_dx_list[i - period:i]))
+    for i in range(period - 1, len(positive_dx_list)):
+        smooth_positive_dx.append(statistics.fmean(positive_dx_list[i - period + 1: i+1]))
+        smooth_negative_dx.append(statistics.fmean(negative_dx_list[i - period + 1:i+1]))
     return smooth_positive_dx, smooth_negative_dx
 
 
@@ -137,7 +137,7 @@ def calculate_directional_index(positive_directional_movement_index: List[float]
         directional_index.append(
             (abs(positive_directional_movement_index[i] - negative_directional_movement_index[i]) /
              (positive_directional_movement_index[i] + negative_directional_movement_index[i])) * 100)
-        return directional_index
+    return directional_index
 
 
 def calculate_average_directional_index(directional_index: List[float], period: int) -> List[float]:
