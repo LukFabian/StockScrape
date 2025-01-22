@@ -27,6 +27,10 @@ class Chart(Base):
     close = Column(BigInteger, nullable=False)
     volume = Column(BigInteger, nullable=False)
     date = Column(Date, primary_key=True)
+    adx_14 = Column(Double, nullable=True)
+    adx_120 = Column(Double, nullable=True)
+    rsi_14 = Column(Double, nullable=True)
+    rsi_120 = Column(Double, nullable=True)
     symbol = Column(String, ForeignKey("stock.symbol"), primary_key=True)
 
     stock = relationship("Stock", back_populates="charts")

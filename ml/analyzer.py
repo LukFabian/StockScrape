@@ -1,8 +1,9 @@
 import datetime
 import pathlib
 
-from sqlalchemy import func
+from sqlalchemy import func, update
 
+import models
 from financial_mathematics import average_directional_index
 from database.manager import DatabaseManager
 from stock_scrape_logger import logger
@@ -25,7 +26,8 @@ class Analyzer:
         if self.db_url == "":
             logger.critical("empty DB_URL environment variable")
         self.db_manager = DatabaseManager(self.db_url, self.alembic_config_path)
-        self.interpolate_chart_data()
+        self._interpolate_chart_data()
+        self._create_features()
 
     def __enter__(self):
         return self
@@ -34,8 +36,7 @@ class Analyzer:
         if self.db_manager is not None:
             self.db_manager.close()
 
-    def interpolate_chart_data(self):
-
+    def _interpolate_chart_data(self):
         with self.db_manager.get_session() as session:
             stocks_with_charts = (
                 session.query(Stock)
@@ -100,12 +101,49 @@ class Analyzer:
                 print(stock)
 
     def _create_features(self):
+        with self.db_manager.get_session() as session:
+            stocks_with_charts = (
+                session.query(Stock)
+                .join(Chart, Stock.symbol == Chart.symbol)  # Join with the related `charts` table
+                .group_by(Stock.symbol, Chart.date)  # Group by `Stock` to count related rows
+                .having(func.count(Stock.charts) > 0)  # Only include stocks with charts
+                .order_by(Chart.date)
+                .all()
+            )
+            # Prepare a list of update statements to execute in bulk
+            update_statements = []
 
-        train_data.chart.adx_14 = average_directional_index.calculate_adx(train_data.chart.high,
-                                                                               train_data.chart.low,
-                                                                               train_data.chart.close, 14)
-        train_data.chart.adx_120 = average_directional_index.calculate_adx(train_data.chart.high,
-                                                                                train_data.chart.low,
-                                                                                train_data.chart.close, 120)
-        print(
-            f"Date: {self.train_data.chart.date}, High: {self.train_data.chart.high} Adx_14: {self.train_data.chart.adx_14} Adx_120: {self.train_data.chart.adx_120}")
+            for stock in stocks_with_charts:
+                high_values = [chart.high for chart in stock.charts]
+                low_values = [chart.low for chart in stock.charts]
+                close_values = [chart.close for chart in stock.charts]
+
+                adx_14 = average_directional_index.calculate_adx(high_values, low_values, close_values, 14)
+                adx_120 = average_directional_index.calculate_adx(high_values, low_values, close_values, 120)
+
+                # Calculate the offset between adx_14 and adx_120 lengths
+                offset = len(adx_14) - len(adx_120)
+
+                for i, chart in enumerate(stock.charts):
+                    if i >= len(adx_14):
+                        continue
+
+                    update_data = {
+                        "adx_14": adx_14[i],
+                    }
+                    # Only add adx_120 when the index is within range
+                    if i >= offset:
+                        update_data["adx_120"] = adx_120[i - offset]
+
+                    update_statements.append(
+                        update(models.Chart)
+                        .where(models.Chart.symbol == chart.symbol, models.Chart.date == chart.date)
+                        .values(**update_data)
+                    )
+
+            # Execute all updates in bulk
+            for stmt in update_statements:
+                session.execute(stmt)
+
+            # Commit the session
+            session.commit()

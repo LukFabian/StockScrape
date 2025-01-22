@@ -1,6 +1,6 @@
 services:
     database:
-      container_name: database
+      container_name: stockscrape_db
       image: postgres:17.2
       environment:
         POSTGRES_USER: stock
