@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/@openapitools/openapi-generator-cli/config.schema.json",
+  "spaces": 2,
+  "generator-cli": {
+    "version": "7.11.0",
+    "generators": {
+      "python-backend": {
+        "generatorName": "python-flask",
+        "output": "generated/python-backend",
+        "inputSpec": "openapi.yaml",
+        "additionalProperties": {
+          "packageName": "openapi_backend",
+          "projectName": "OpenAPI Backend",
+          "useFastApi": true,
+          "useTypeAnnotations": true,
+          "enumClassPrefix": true
+        }
+      },
+      "typescript-vue-frontend": {
+        "generatorName": "typescript",
+        "output": "generated/typescript-vue-frontend",
+        "inputSpec": "openapi.yaml",
+        "additionalProperties": {
+          "supportsES6": true,
+          "withInterfaces": true,
+          "useSingleRequestParameter": true
+        }
+      }
+    }
+  }
+}

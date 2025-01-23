@@ -1,0 +1,102 @@
+openapi: 3.0.3
+info:
+  title: StockScrape
+  description: StockScrape - a tool made for technical analysis of stocks
+  version: 0.0.1
+servers:
+  - url: 'http://127.0.0.1:8080'
+paths:
+  "/stock/{symbol}":
+    get:
+      description: "Returns an individual stock object and associated charts which maps to the symbol parameter."
+      operationId: "stock_symbol_get"
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: "The stock symbol to retrieve information for."
+          schema:
+            type: string
+      responses:
+        200:
+          description: "A stock object with associated charts."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stock'
+components:
+  schemas:
+    Stock:
+      type: object
+      properties:
+        symbol:
+          type: string
+          description: The stock's unique symbol
+        name:
+          type: string
+          description: The stock's name
+        industry:
+          type: string
+          description: The industry of the stock
+        marketcap:
+          type: number
+          format: double
+          description: Market capitalization
+        isNasdaq100:
+          type: boolean
+          description: Whether the stock is in the Nasdaq-100
+        deltaIndicator:
+          type: string
+          description: A delta indicator for the stock
+        charts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Chart'
+    Chart:
+      type: object
+      properties:
+        high:
+          type: integer
+          description: The highest price for the day
+          nullable: False
+        low:
+          type: integer
+          description: The lowest price for the day
+          nullable: False
+        open:
+          type: integer
+          description: The opening price for the day
+          nullable: False
+        close:
+          type: integer
+          description: The closing price for the day
+          nullable: False
+        volume:
+          type: integer
+          description: The trading volume for the day
+          nullable: False
+        date:
+          type: string
+          format: date
+          description: The date of the chart
+          nullable: False
+        adx_14:
+          type: number
+          format: double
+          description: ADX value with a period of 14
+        adx_120:
+          type: number
+          format: double
+          description: ADX value with a period of 120
+        rsi_14:
+          type: number
+          format: double
+          description: RSI value with a period of 14
+        rsi_120:
+          type: number
+          format: double
+          description: RSI value with a period of 120
+        symbol:
+          type: string
+          description: The associated stock symbol
+          nullable: False
