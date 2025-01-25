@@ -6,7 +6,7 @@ import pathlib
 
 import sqlalchemy.exc
 
-from database import models
+from app import models
 from database.manager import DatabaseManager
 from sqlalchemy.sql import Insert, Select, Update
 

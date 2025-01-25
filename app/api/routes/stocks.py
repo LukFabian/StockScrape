@@ -1,36 +1,26 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Path
+from fastapi import APIRouter, Path, HTTPException
 from sqlalchemy import func
 
 from app.api.deps import SessionDep
-from app.models.stock import Stock as AppStock
-from database.models import Stock, Chart
+from app.models import Stock, Chart
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
-@router.get("/{symbol}", response_model=AppStock)
+@router.get("/{symbol}", response_model=Stock)
 async def get_stock(session: SessionDep,
                     symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve")]):
     stock = (
         session.query(Stock)
-        .join(Chart, Stock.symbol == Chart.symbol)  # Join with the related `charts` table
-        .group_by(Stock.symbol, Chart.date)  # Group by `Stock` to count related rows
-        .having(Stock.symbol == symbol)  # Only include stocks with charts
-        .order_by(Chart.date)
-        .one()
+        .join(Chart, Stock.symbol == Chart.symbol)  # Join `Stock` with `Chart`
+        .filter(Stock.symbol == symbol)  # Filter by the given symbol
+        .group_by(Stock.symbol)  # Group by `Stock.symbol`
+        .order_by(func.max(Chart.date).desc())
+        .one_or_none()  # Fetch one row or return `None`
     )
-    # convert to valid pydantic object
-    """
-    stock = AppStock(
-        symbol=symbol,
-        name=stock.name,
-        industry=stock.industry,
-        marketcap=stock.marketcap,
-        isNasdaq100=stock.isNasdaq100,
-        delta_indicator=stock.deltaIndicator,
-        charts=stock.charts
-    )
-    """
+
+    if not stock:
+        raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
     return stock

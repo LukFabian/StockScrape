@@ -3,11 +3,11 @@ import pathlib
 
 from sqlalchemy import func, update
 
-from database import models
+from app import models
 from financial_mathematics import average_directional_index
 from database.manager import DatabaseManager
 from stock_scrape_logger import logger
-from database.models import Stock, Chart
+from app.models import Stock, Chart
 from scipy.interpolate import CubicSpline
 
 file_path = pathlib.Path(__file__).parent.resolve()
