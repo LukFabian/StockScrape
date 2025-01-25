@@ -8,11 +8,6 @@ from alembic.script import ScriptDirectory
 from alembic.runtime.migration import MigrationContext
 
 
-# Helper function to convert a query result row to a dictionary
-def row_to_dict(row):
-    return {column.key: getattr(row, column.key) for column in row.__table__.columns}
-
-
 class DatabaseManager:
     """
     Manages the SQLAlchemy database connection and ensures the database

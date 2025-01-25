@@ -1,9 +1,0 @@
-models
-types
-http
-auth
-apis
-.openapi-generator
-util.ts
-servers.ts
-rxjsStub.ts

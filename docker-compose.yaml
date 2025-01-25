@@ -3,10 +3,10 @@ services:
       container_name: stockscrape_db
       image: postgres:17.2
       environment:
-        POSTGRES_USER: stock
-        POSTGRES_PASSWORD: stockpass
+        POSTGRES_USER: ${POSTGRES_USER}
+        POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       ports:
-        - "127.0.0.1:5432:5432"
+        - "${DB_HOST}:${DB_PORT}:${DB_PORT}"
       restart: always
       volumes:
           - db_data:/var/lib/postgresql/data
