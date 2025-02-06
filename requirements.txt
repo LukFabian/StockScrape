@@ -6,3 +6,4 @@ scipy==1.14.1
 pydantic==2.10.5
 pydantic_settings==2.7.1
 sqlmodel==0.0.22
+psycopg2-binary==2.9.10
