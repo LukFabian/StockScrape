@@ -8,7 +8,7 @@ class Stock(SQLModel, table=True):
     symbol: str = Field(primary_key=True, nullable=False)
     name: str = Field(nullable=False)
     industry: Optional[str] = Field(default=None)
-    marketcap: float = Field(nullable=False)
+    marketcap: Optional[float] = Field(default=None)
     isNasdaq100: Optional[bool] = Field(default=None)
     deltaIndicator: Optional[str] = Field(default=None)
 
