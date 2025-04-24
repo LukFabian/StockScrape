@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@mdi/font": "7.4.47",
+    "axios": "^1.8.4",
     "chart.js": "^4.4.9",
     "roboto-fontface": "*",
     "sass": "^1.86.3",

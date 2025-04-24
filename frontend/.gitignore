@@ -2,5 +2,5 @@ wwwroot/*.js
 node_modules
 typings
 dist
-generated/*
-!generated/.openapi-generator-ignore
+src/generated/*
+!src/generated/.openapi-generator-ignore
