@@ -137,15 +137,14 @@ class Scraper:
         formatting = "%Y-%m-%d"
         five_years_ago_str = five_years_ago.strftime(formatting)
         today_str = today.strftime(formatting)
-        animation = "|/-\\"
         with self.db_manager.get_connection() as conn:
             for symbol in symbols:
                 request_url = f"https://api.nasdaq.com/api/quote/{symbol.lower()}/chart?assetclass=stocks&fromdate={five_years_ago_str}&todate={today_str}"
                 json_resp = requests.get(request_url, headers=self.request_headers).json()
-                process_stocks(json_resp.get("data"), conn)
-                idx = 0
-                for i in range(5):
-                    print(animation[idx % len(animation)], end="\r")
-                    idx += 1
-                    time.sleep(random.randint(1, 4) / 10)
+                json_data = json_resp.get("data")
+                if json_data:
+                    process_stocks(json_resp.get("data"), conn)
+                else:
+                    logger.warning(f"no stock data for {symbol}")
+                time.sleep(random.randint(1, 3))
             logger.info(f"Successfully fetched stock data for stock: {symbol} from nasdaq")

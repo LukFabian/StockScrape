@@ -3,9 +3,10 @@ from typing import Annotated
 
 import requests
 import sqlalchemy
-from fastapi import APIRouter, Path, HTTPException
-from sqlalchemy import func
-
+from fastapi import APIRouter, Path, HTTPException, Query
+from sqlmodel import select
+from sqlalchemy.orm import aliased
+from sqlalchemy import func, desc, asc
 from app.api.deps import SessionDep
 from app.models import Stock, Chart
 from app.utils import process_stocks_from_nasdaq
@@ -29,9 +30,10 @@ async def get_stock(session: SessionDep,
         raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
     return stock
 
+
 @router.put("/{symbol}", response_model=Stock)
 async def update_stock(session: SessionDep,
-                    symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from nasdaq")]):
+                       symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from nasdaq")]):
     request_headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"}
     today = datetime.datetime.now()
     time_delta = datetime.timedelta(days=365 * 5)
@@ -43,7 +45,6 @@ async def update_stock(session: SessionDep,
     json_resp = requests.get(request_url, headers=request_headers).json()
     if not json_resp:
         raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
-
 
     stock = process_stocks_from_nasdaq(json_resp.get("data"))
     session.add(stock)
@@ -59,3 +60,44 @@ async def update_stock(session: SessionDep,
             session.commit()
             return existing_stock
     return stock
+
+
+@router.get("/", response_model=Stock)
+async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'")):
+    # Alias for self-join
+    chart_prev = aliased(Chart)
+
+    # Build the subquery with performance calculation
+    subquery = (
+        select(
+            Chart.symbol.label("symbol"),
+            ((Chart.close - chart_prev.close) / chart_prev.close).label("performance")
+        )
+        .join(
+            chart_prev,
+            (Chart.symbol == chart_prev.symbol) &
+            (func.date(Chart.date) == func.date(chart_prev.date + datetime.timedelta(days=1)))
+        )
+    ).subquery()
+
+
+    # Choose best or worst performer
+    if mode == "best":
+        stmt = (
+            select(subquery)
+            .order_by(desc(subquery.c.performance))
+            .limit(1)
+        )
+    elif mode == "worst":
+        stmt = (
+            select(subquery)
+            .order_by(asc(subquery.c.performance))
+            .limit(1)
+        )
+    else:
+        return {"error": "Invalid mode. Choose 'best' or 'worst'."}
+    stock = session.execute(stmt).first()
+    existing_stock = session.get(Stock, stock.symbol)
+    if not existing_stock:
+        raise HTTPException(status_code=404, detail=f"no stocks exist in database")
+    return existing_stock
