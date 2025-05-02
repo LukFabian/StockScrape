@@ -1,20 +1,21 @@
 import datetime
-from typing import Annotated
-
+from typing import Annotated, Optional
+import json
 import requests
-import sqlalchemy
 from fastapi import APIRouter, Path, HTTPException, Query
 from sqlmodel import select
 from sqlalchemy.orm import aliased
 from sqlalchemy import func, desc, asc
 from app.api.deps import SessionDep
+from app.core.config import settings
 from app.models import Stock, Chart
-from app.utils import process_stocks_from_nasdaq
+from app.schemas import StockRead
+from app.utils import process_stocks_from_alphavantage
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
-@router.get("/{symbol}", response_model=Stock)
+@router.get("/{symbol}", response_model=StockRead)
 async def get_stock(session: SessionDep,
                     symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from database")]):
     stock = (
@@ -31,73 +32,73 @@ async def get_stock(session: SessionDep,
     return stock
 
 
-@router.put("/{symbol}", response_model=Stock)
-async def update_stock(session: SessionDep,
-                       symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from nasdaq")]):
-    request_headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:131.0) Gecko/20100101 Firefox/131.0"}
-    today = datetime.datetime.now()
-    time_delta = datetime.timedelta(days=365 * 5)
-    five_years_ago = today - time_delta
-    formatting = "%Y-%m-%d"
-    five_years_ago_str = five_years_ago.strftime(formatting)
-    today_str = today.strftime(formatting)
-    request_url = f"https://api.nasdaq.com/api/quote/{symbol.lower()}/chart?assetclass=stocks&fromdate={five_years_ago_str}&todate={today_str}"
-    json_resp = requests.get(request_url, headers=request_headers).json()
-    if not json_resp:
-        raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
+@router.get("/", response_model=StockRead)
+async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'"),
+                     start: Optional[datetime.datetime] = Query(None,
+                                                                description="ISO 8601, e.g. 2025-04-24T09:30:00Z")):
+    # 1. Validate input
+    start = start if start else datetime.datetime.now()  - datetime.timedelta(days=7)
+    start = start.date()
+    if mode not in {"best", "worst"}:
+        raise HTTPException(status_code=400, detail="Invalid mode. Choose 'best' or 'worst'.")
 
-    stock = process_stocks_from_nasdaq(json_resp.get("data"))
-    session.add(stock)
-    try:
-        session.commit()
-    except sqlalchemy.exc.IntegrityError:
-        session.rollback()
-        existing_stock = session.get(Stock, stock.symbol)
-        if existing_stock:
-            for key, value in stock.model_dump().items():
-                setattr(existing_stock, key, value)
-            session.add(existing_stock)
-            session.commit()
-            return existing_stock
-    return stock
+    # Aliases for self-join
+    chart_start = aliased(Chart)
+    chart_latest = aliased(Chart)
 
-
-@router.get("/", response_model=Stock)
-async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'")):
-    # Alias for self-join
-    chart_prev = aliased(Chart)
-
-    # Build the subquery with performance calculation
+    # 2. Subquery: calculate performance for each stock within timeframe
     subquery = (
         select(
-            Chart.symbol.label("symbol"),
-            ((Chart.close - chart_prev.close) / chart_prev.close).label("performance")
+            chart_latest.symbol.label("symbol"),
+            ((chart_latest.close - chart_start.close) / chart_start.close).label("performance")
         )
         .join(
-            chart_prev,
-            (Chart.symbol == chart_prev.symbol) &
-            (func.date(Chart.date) == func.date(chart_prev.date + datetime.timedelta(days=1)))
+            chart_start,
+            (chart_latest.symbol == chart_start.symbol)
+            & (chart_start.date == start)
+        )
+        .where(
+            chart_latest.date == select(func.max(Chart.date))
+                                .where(Chart.symbol == chart_latest.symbol)
+                                .scalar_subquery()
         )
     ).subquery()
 
+    # 3. Select best or worst performer
+    order_clause = desc(subquery.c.performance) if mode == "best" else asc(subquery.c.performance)
 
-    # Choose best or worst performer
-    if mode == "best":
-        stmt = (
-            select(subquery)
-            .order_by(desc(subquery.c.performance))
-            .limit(1)
-        )
-    elif mode == "worst":
-        stmt = (
-            select(subquery)
-            .order_by(asc(subquery.c.performance))
-            .limit(1)
-        )
-    else:
-        return {"error": "Invalid mode. Choose 'best' or 'worst'."}
-    stock = session.execute(stmt).first()
-    existing_stock = session.get(Stock, stock.symbol)
-    if not existing_stock:
-        raise HTTPException(status_code=404, detail=f"no stocks exist in database")
-    return existing_stock
+    stmt = select(subquery).order_by(order_clause).limit(1)
+
+    symbol = session.execute(stmt).scalar_one_or_none()
+    if not symbol:
+        raise HTTPException(status_code=404, detail="No stocks found for the given timeframe.")
+
+    return await get_stock(session, symbol)
+
+
+@router.get("/count/all", response_model=int)
+async def get_stocks_count(session: SessionDep):
+    stmt = select(func.count(Stock.symbol))
+    return session.execute(stmt).scalar_one_or_none()
+
+
+@router.put("/{symbol}", response_model=StockRead)
+async def put_stock(session: SessionDep,
+                    symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from alphavantage")],
+                    time_frame: str = Query(..., description="Choose between 'MONTHLY' or 'WEEKLY' or 'DAILY'")):
+    api_key = settings.ALPHAVANTAGE_API_KEY
+    match time_frame:
+        case "MONTHLY":
+            request_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_MONTHLY&symbol={symbol}&apikey={api_key}"
+        case "WEEKLY":
+            request_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol={symbol}&apikey={api_key}"
+        case "DAILY":
+            request_url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={api_key}"
+        case _:
+            raise HTTPException(status_code=400, detail=f"wrong time_frame specified: {time_frame}")
+
+    data = requests.get(request_url).json()
+    with open(f'data_{time_frame}.json', 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
+    process_stocks_from_alphavantage(session, data, time_frame)
+    return await get_stock(session, symbol)

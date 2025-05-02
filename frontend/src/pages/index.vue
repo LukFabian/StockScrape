@@ -11,8 +11,8 @@
     <v-row dense>
       <!-- Best Performer -->
       <v-col cols="12" md="6">
-        <v-card v-if="bestChartData !== null">
-          <v-card-title>📈 Best Performing (24h): {{ bestStock.name }} ({{ bestStock.ticker }})</v-card-title>
+        <v-card v-if="bestChartData !== null && bestStock !== null">
+          <v-card-title>📈 Best Performing (24h): {{ bestStock.name }} ({{ bestStock.symbol }})</v-card-title>
           <v-card-text>
             <LineChart :data="bestChartData" :chart-options="chartOptions"/>
           </v-card-text>
@@ -21,8 +21,8 @@
 
       <!-- Worst Performer -->
       <v-col cols="12" md="6">
-        <v-card v-if="worstChartData !== null">
-          <v-card-title>📉 Worst Performing (24h): {{ worstStock.name }} ({{ worstStock.ticker }})</v-card-title>
+        <v-card v-if="worstChartData !== null && worstStock !== null">
+          <v-card-title>📉 Worst Performing (24h): {{ worstStock.name }} ({{ worstStock.symbol }})</v-card-title>
           <v-card-text>
             <LineChart :data="worstChartData" :chart-options="chartOptions"/>
           </v-card-text>
@@ -33,75 +33,69 @@
 </template>
 
 <script setup lang="ts">
-import {ref, computed} from 'vue'
-import {Chart as ChartJS, registerables} from 'chart.js'
-import {Line} from 'vue-chartjs'
-import {stocksApi} from "@/plugins";
+import { ref, computed, onMounted } from 'vue';
+import { Chart as ChartJS, registerables } from 'chart.js';
+import { Line } from 'vue-chartjs';
+import {chartsApi, stocksApi} from '@/plugins';
+import type {StockRead, ChartRead} from "@/generated";
+import {DAY} from "@/utils.ts";
 
-ChartJS.register(...registerables)
+ChartJS.register(...registerables);
+const LineChart = Line;
 
-// Register LineChart as a wrapper component
-const LineChart = Line
+/* ------------ reactive state ------------ */
+const stockCount   = ref(0);
 
-// Data: Counter
-const stockCount = ref(1245)
+const bestStock    = ref<StockRead | null>(null);
+const worstStock   = ref<StockRead | null>(null);
 
-let bestStock: Stock | null = null;
-let worstStock: Stock | null = null;
-let bestChartData = null;
-let worstChartData = null;
+const bestChart = ref<ChartRead[] | null>(null);
+const worstChart = ref<ChartRead[] | null>(null);
 
-onMounted(() => {
-  stocksApi.stocksGetStocks("best").then((stock) => {
-    bestStock = stock;
-    bestChartData = computed(() => ({
-      labels: bestStock.value.data.map((point) => point.time),
-      datasets: [
-        {
-          label: 'Price in €',
-          data: bestStock.value.data.map((point) => point.price),
-        },
-      ],
-      chartOptions: {
-        responsive: true
-      }
-    }))
-  });
-  stocksApi.stocksGetStocks("worst").then((stock) => {
-    worstStock = stock;
-    worstChartData = computed(() => ({
-      labels: worstStock.value.data.map((point) => point.time),
-      datasets: [
-        {
-          label: 'Price in €',
-          data: worstStock.value.data.map((point) => point.price),
-        },
-      ],
-      chartOptions: {
-        responsive: true
-      }
-    }))
-  });
-})
+/* graphs build themselves whenever the API data changes */
+const bestChartData  = computed(() =>
+  bestChart.value
+    ? {
+      labels: bestChart.value.map(p => p.date.substring(0, 10)), // extract date part of iso string
+      datasets: [{ label: 'Price in $', data: bestChart.value.map(p => p.open / 100) }]
+    }
+    : null
+);
+
+const worstChartData = computed(() =>
+  worstChart.value
+    ? {
+      labels: worstChart.value.map(p => p.date.substring(0, 10)), // extract date part of iso string
+      datasets: [{ label: 'Price in $', data: worstChart.value.map(p => p.open / 100) }]
+    }
+    : null
+);
 
 const chartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  scales: {
-    y: {
-      beginAtZero: false,
-    },
-  },
-  plugins: {
-    legend: {
-      display: false,
-    },
-  },
-}
-</script>
+  scales: { y: { beginAtZero: false } },
+  plugins: { legend: { display: false } },
+};
 
-<style scoped>
-.v-card-text {
-  height: 300px;
-}
-</style>
+/* ------------ load data once on mount ------------ */
+onMounted(async () => {
+  /* parallel fetch */
+  const [best, worst] = await Promise.all([
+    stocksApi.stocksGetStocks('best'),
+    stocksApi.stocksGetStocks('worst')
+  ]);
+  bestStock.value  = best.data;
+  worstStock.value = worst.data;
+  const now      = new Date();
+  const weekAgo = new Date(now.getTime() - (DAY * 7));
+  const [localChartBest, localChartWorst, stocksCount] = await Promise.all([
+    chartsApi.chartsGetStockWithCharts(bestStock.value.symbol),
+    chartsApi.chartsGetStockWithCharts(worstStock.value.symbol),
+    stocksApi.stocksGetStocksCount()
+  ]);
+  bestChart.value = localChartBest.data.charts;
+  worstChart.value = localChartWorst.data.charts;
+  stockCount.value = stocksCount.data
+});
+</script>

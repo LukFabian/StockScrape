@@ -20,9 +20,6 @@ def upgrade() -> None:
     op.create_table(
         'stock',
         sa.Column('symbol', sa.VARCHAR(), primary_key=True, nullable=False, unique=True),
-        sa.Column('name', sa.VARCHAR(), nullable=False),
-        sa.Column('industry', sa.VARCHAR()),
-        sa.Column('marketcap', sa.BigInteger(), nullable=False),
     )
 
 

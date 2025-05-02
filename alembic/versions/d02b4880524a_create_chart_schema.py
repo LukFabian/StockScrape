@@ -17,10 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Modify stocks table to include new columns
-    op.add_column('stock', sa.Column('isNasdaq100', sa.Boolean(), nullable=True))
-    op.add_column('stock', sa.Column('deltaIndicator', sa.VARCHAR(), nullable=True))
-
     # Create chart table
     op.create_table(
         'chart',
@@ -37,7 +33,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     # Drop chart table
     op.drop_table('chart')
-
-    # Remove added columns from stock table
-    op.drop_column('stock', 'isNasdaq100')
-    op.drop_column('stock', 'deltaIndicator')
