@@ -1,19 +1,41 @@
+import datetime
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
+from sqlalchemy import select, and_
 
+from app.api.deps import db_manager
 from app.api.main import api_router
+from app.api.routes.stocks import put_stock
 from app.core.config import settings
+from app.models import Stock, Chart
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    with db_manager.get_session() as session:
+        yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
+        stmt = (
+            select(Stock.symbol)
+            .outerjoin(Chart, and_(Stock.symbol == Chart.symbol, Chart.date == yesterday))
+            .where(Chart.symbol == None)
+        )
+        result = session.execute(stmt).scalars().all()
+        for symbol in result:
+            await put_stock(session, symbol, time_frame="DAILY")
+    yield
 
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url="/api/openapi.json",
     generate_unique_id_function=custom_generate_unique_id,
+    lifespan=lifespan
 )
 
 origins = [

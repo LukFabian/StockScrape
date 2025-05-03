@@ -1,16 +1,14 @@
 import datetime
 from typing import Annotated, Optional
-import json
 import requests
 from fastapi import APIRouter, Path, HTTPException, Query
 from sqlmodel import select
-from sqlalchemy.orm import aliased
-from sqlalchemy import func, desc, asc
+from sqlalchemy import func
 from app.api.deps import SessionDep
 from app.core.config import settings
 from app.models import Stock, Chart
-from app.schemas import StockRead
-from app.utils import process_stocks_from_alphavantage
+from app.schemas import StockRead, StockPerformanceRead
+from app.utils import process_stocks_from_alphavantage, calculate_technical_stock_data, get_stock_performance
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -32,48 +30,28 @@ async def get_stock(session: SessionDep,
     return stock
 
 
-@router.get("/", response_model=StockRead)
+@router.get("/")
 async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'"),
                      start: Optional[datetime.datetime] = Query(None,
-                                                                description="ISO 8601, e.g. 2025-04-24T09:30:00Z")):
-    # 1. Validate input
+                                                                description="ISO 8601, e.g. 2025-04-24T09:30:00Z")) -> StockPerformanceRead:
     start = start if start else datetime.datetime.now()  - datetime.timedelta(days=7)
-    start = start.date()
     if mode not in {"best", "worst"}:
         raise HTTPException(status_code=400, detail="Invalid mode. Choose 'best' or 'worst'.")
 
-    # Aliases for self-join
-    chart_start = aliased(Chart)
-    chart_latest = aliased(Chart)
-
-    # 2. Subquery: calculate performance for each stock within timeframe
-    subquery = (
-        select(
-            chart_latest.symbol.label("symbol"),
-            ((chart_latest.close - chart_start.close) / chart_start.close).label("performance")
-        )
-        .join(
-            chart_start,
-            (chart_latest.symbol == chart_start.symbol)
-            & (chart_start.date == start)
-        )
-        .where(
-            chart_latest.date == select(func.max(Chart.date))
-                                .where(Chart.symbol == chart_latest.symbol)
-                                .scalar_subquery()
-        )
-    ).subquery()
-
-    # 3. Select best or worst performer
-    order_clause = desc(subquery.c.performance) if mode == "best" else asc(subquery.c.performance)
-
-    stmt = select(subquery).order_by(order_clause).limit(1)
-
-    symbol = session.execute(stmt).scalar_one_or_none()
-    if not symbol:
+    symbols = session.execute(select(Stock.symbol)).scalars().all()
+    result_stock = None
+    for symbol in symbols:
+        result = get_stock_performance(session=session, stock_symbol=symbol, start_time=start, is_best=mode == "best")
+        if not result_stock:
+            result_stock = result
+        elif result.performance < result_stock.performance and mode == "worst":
+            result_stock = result
+        elif result.performance > result_stock.performance and mode == "best":
+            result_stock = result
+    if not result_stock:
         raise HTTPException(status_code=404, detail="No stocks found for the given timeframe.")
 
-    return await get_stock(session, symbol)
+    return result_stock
 
 
 @router.get("/count/all", response_model=int)
@@ -98,7 +76,7 @@ async def put_stock(session: SessionDep,
             raise HTTPException(status_code=400, detail=f"wrong time_frame specified: {time_frame}")
 
     data = requests.get(request_url).json()
-    with open(f'data_{time_frame}.json', 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
     process_stocks_from_alphavantage(session, data, time_frame)
+    stock = await get_stock(session, symbol)
+    calculate_technical_stock_data(session, stock.symbol)
     return await get_stock(session, symbol)

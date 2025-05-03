@@ -16,8 +16,15 @@ class ChartRead(BaseModel):
     rsi_14: Optional[float] = None
     rsi_120: Optional[float] = None
 
+    class Config:
+        from_attributes=True
+
 
 class StockRead(BaseModel):
     symbol: str
     last_modified: datetime = None
     charts: List[ChartRead] = []
+
+
+class StockPerformanceRead(StockRead):
+    performance: float

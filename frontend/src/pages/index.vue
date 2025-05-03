@@ -10,21 +10,23 @@
 
     <v-row dense>
       <!-- Best Performer -->
-      <v-col cols="12" md="6">
+      <v-col cols="12">
         <v-card v-if="bestChartData !== null && bestStock !== null">
-          <v-card-title>📈 Best Performing (24h): {{ bestStock.name }} ({{ bestStock.symbol }})</v-card-title>
+          <v-card-title>📈 Best Performing (24h): ({{ bestStock.symbol }})</v-card-title>
+          <v-card-subtitle>Performance (7 days): {{bestStock.performance.toFixed(2) + '%'}}</v-card-subtitle>
           <v-card-text>
-            <LineChart :data="bestChartData" :chart-options="chartOptions"/>
+            <LineChart :data="bestChartData" :chart-options="chartOptions" />
           </v-card-text>
         </v-card>
       </v-col>
 
       <!-- Worst Performer -->
-      <v-col cols="12" md="6">
+      <v-col cols="12">
         <v-card v-if="worstChartData !== null && worstStock !== null">
-          <v-card-title>📉 Worst Performing (24h): {{ worstStock.name }} ({{ worstStock.symbol }})</v-card-title>
+          <v-card-title>📉 Worst Performing: ({{ worstStock.symbol }})</v-card-title>
+          <v-card-subtitle>Performance (7 days): {{worstStock.performance.toFixed(2) + '%'}}</v-card-subtitle>
           <v-card-text>
-            <LineChart :data="worstChartData" :chart-options="chartOptions"/>
+            <LineChart :data="worstChartData" :chart-options="chartOptions" />
           </v-card-text>
         </v-card>
       </v-col>
@@ -37,7 +39,7 @@ import { ref, computed, onMounted } from 'vue';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { Line } from 'vue-chartjs';
 import {chartsApi, stocksApi} from '@/plugins';
-import type {StockRead, ChartRead} from "@/generated";
+import type {StockPerformanceRead, ChartRead} from "@/generated";
 import {DAY} from "@/utils.ts";
 
 ChartJS.register(...registerables);
@@ -46,8 +48,8 @@ const LineChart = Line;
 /* ------------ reactive state ------------ */
 const stockCount   = ref(0);
 
-const bestStock    = ref<StockRead | null>(null);
-const worstStock   = ref<StockRead | null>(null);
+const bestStock    = ref<StockPerformanceRead | null>(null);
+const worstStock   = ref<StockPerformanceRead | null>(null);
 
 const bestChart = ref<ChartRead[] | null>(null);
 const worstChart = ref<ChartRead[] | null>(null);
