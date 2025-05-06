@@ -25,6 +25,9 @@ class StockRead(BaseModel):
     last_modified: datetime = None
     charts: List[ChartRead] = []
 
+    class Config:
+        from_attributes=True
+
 
 class StockPerformanceRead(StockRead):
     performance: float

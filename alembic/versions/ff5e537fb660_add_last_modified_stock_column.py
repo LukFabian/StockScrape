@@ -1,7 +1,7 @@
 """add last_modified stock column
 
 Revision ID: ff5e537fb660
-Revises: 53578ae7facf
+Revises: d02b4880524a
 Create Date: 2025-05-02 15:34:18.500943
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'ff5e537fb660'
-down_revision: Union[str, None] = '53578ae7facf'
+down_revision: Union[str, None] = 'd02b4880524a'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

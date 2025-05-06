@@ -13,10 +13,11 @@ from app.utils import process_stocks_from_alphavantage, calculate_technical_stoc
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
 
-@router.get("/{symbol}", response_model=StockRead)
+@router.get("/{symbol}")
 async def get_stock(session: SessionDep,
-                    symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from database")]):
-    stock = (
+                    symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from database")],
+                    with_technicals: Optional[bool] = Query(False, description="Also calculate the technical stock data")) -> StockRead:
+    stock: Stock = (
         session.query(Stock)
         .join(Chart, Stock.symbol == Chart.symbol)  # Join `Stock` with `Chart`
         .filter(Stock.symbol == symbol)  # Filter by the given symbol
@@ -27,8 +28,10 @@ async def get_stock(session: SessionDep,
 
     if not stock:
         raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
-    return stock
-
+    stock_read: StockRead = StockRead.model_validate(stock, from_attributes=True)
+    if with_technicals:
+        stock_read = calculate_technical_stock_data(stock_read)
+    return stock_read
 
 @router.get("/")
 async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'"),
@@ -50,8 +53,14 @@ async def get_stocks(session: SessionDep, mode: str = Query(..., description="Ch
             result_stock = result
     if not result_stock:
         raise HTTPException(status_code=404, detail="No stocks found for the given timeframe.")
-
-    return result_stock
+    performance = result_stock.performance
+    result_stock_with_technical_data = calculate_technical_stock_data(result_stock)
+    return StockPerformanceRead(
+        symbol=result_stock.symbol,
+        performance=performance,
+        charts=result_stock_with_technical_data.charts,
+        last_modified=result_stock_with_technical_data.last_modified,
+    )
 
 
 @router.get("/count/all", response_model=int)
@@ -77,6 +86,4 @@ async def put_stock(session: SessionDep,
 
     data = requests.get(request_url).json()
     process_stocks_from_alphavantage(session, data, time_frame)
-    stock = await get_stock(session, symbol)
-    calculate_technical_stock_data(session, stock.symbol)
     return await get_stock(session, symbol)

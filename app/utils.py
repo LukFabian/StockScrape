@@ -6,7 +6,7 @@ from sqlalchemy.orm import aliased
 
 from app.api.deps import SessionDep
 from app.models import Chart, Stock
-from app.schemas import StockPerformanceRead, ChartRead
+from app.schemas import StockPerformanceRead, ChartRead, StockRead
 from financial_mathematics.average_directional_index import calculate_adx
 
 
@@ -87,36 +87,41 @@ def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time
     return stock
 
 
-def calculate_technical_stock_data(session: SessionDep, symbol: str):
-    # 1. Fetch high, low, close data ordered by date ASC (oldest first)
-    stmt = (
-        select(Chart.date, Chart.high, Chart.low, Chart.close)
-        .where(Chart.symbol == symbol)
-        .order_by(asc(Chart.date))
-    )
-    result = session.execute(stmt).all()
-    if not result or len(result) < 28:
-        raise ValueError(f"Not enough chart data for symbol '{symbol}' to compute ADX. Need at least 14 data points.")
+def calculate_technical_stock_data(stock: StockRead) -> StockRead:
+    if len(stock.charts) < 28:
+        raise ValueError(f"Not enough chart data for symbol '{stock.symbol}' to compute ADX. Need at least 14 data points.")
 
     # 2. Unpack the data
-    dates: List = [row.date for row in result]
-    highs: List[int] = [row.high for row in result]
-    lows: List[int] = [row.low for row in result]
-    closes: List[int] = [row.close for row in result]
+    dates: List = [chart.date for chart in stock.charts]
+    highs: List[int] = [chart.high for chart in stock.charts]
+    opens: List[int] = [chart.open for chart in stock.charts]
+    lows: List[int] = [chart.low for chart in stock.charts]
+    closes: List[int] = [chart.close for chart in stock.charts]
+    volumes: List[int] = [chart.volume for chart in stock.charts]
 
     # 3. Calculate ADX values
-    adx_14_list = calculate_adx(highs, lows, closes, period=28)
-    if len(result) >= 120:
+    adx_14_list = calculate_adx(highs, lows, closes, period=14)
+    adx_120_list = None
+    if len(stock.charts) >= 134:
         adx_120_list = calculate_adx(highs, lows, closes, period=120)
 
-    # 4. Optional: attach the latest ADX value to the most recent chart row in DB
-    latest_chart = session.get(Chart, {"symbol": symbol, "date": dates[-1]})
-    if latest_chart:
-        latest_chart.adx_14 = adx_14_list[-1]  # most recent ADX value
-        latest_chart.adx_120 = adx_120_list[-1]
-        session.commit()
-    else:
-        raise ValueError(f"No latest chart found for symbol '{symbol}' on date {dates[-1]}")
+    charts: List[ChartRead] = list()
+    for i in range(len(dates)):
+        charts.append(
+            ChartRead(
+                symbol=stock.symbol,
+                date=dates[i],
+                high=highs[i],
+                open=opens[i],
+                low=lows[i],
+                close=closes[i],
+                volume=volumes[i],
+                adx_14=adx_14_list[i-28] if i >= 28 else None,
+                adx_120=adx_120_list[i-134] if adx_120_list and i >= 134 else None,
+            )
+        )
+    stock.charts = charts
+    return stock
 
 
 def get_stock_performance(session, stock_symbol: str, start_time: datetime, is_best: bool) -> Optional[
@@ -182,7 +187,7 @@ def get_stock_performance(session, stock_symbol: str, start_time: datetime, is_b
 
     if row is None:
         return None
-    charts: List[Chart] = session.execute(select(Chart).where(Chart.symbol == stock_symbol)).scalars().all()
+    charts: List[Chart] = session.execute(select(Chart).where(Chart.symbol == stock_symbol).order_by(Chart.date)).scalars().all()
     charts_read: List[ChartRead] = [ChartRead.model_validate(chart) for chart in charts]
     return StockPerformanceRead(
         symbol=row.symbol,

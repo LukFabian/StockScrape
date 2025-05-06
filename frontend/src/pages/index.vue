@@ -38,9 +38,8 @@
 import { ref, computed, onMounted } from 'vue';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { Line } from 'vue-chartjs';
-import {chartsApi, stocksApi} from '@/plugins';
-import type {StockPerformanceRead, ChartRead} from "@/generated";
-import {DAY} from "@/utils.ts";
+import {stocksApi} from '@/plugins';
+import type {StockPerformanceRead} from "@/generated";
 
 ChartJS.register(...registerables);
 const LineChart = Line;
@@ -51,24 +50,21 @@ const stockCount   = ref(0);
 const bestStock    = ref<StockPerformanceRead | null>(null);
 const worstStock   = ref<StockPerformanceRead | null>(null);
 
-const bestChart = ref<ChartRead[] | null>(null);
-const worstChart = ref<ChartRead[] | null>(null);
-
 /* graphs build themselves whenever the API data changes */
 const bestChartData  = computed(() =>
-  bestChart.value
+  bestStock.value
     ? {
-      labels: bestChart.value.map(p => p.date.substring(0, 10)), // extract date part of iso string
-      datasets: [{ label: 'Price in $', data: bestChart.value.map(p => p.open / 100) }]
+      labels: bestStock.value.charts?.map(p => p.date.substring(0, 10)), // extract date part of iso string
+      datasets: [{ label: 'Price in $', data: bestStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: bestStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 14 (ADX 14)', data: bestStock.value.charts?.map(p => p.adx_120)}]
     }
     : null
 );
 
 const worstChartData = computed(() =>
-  worstChart.value
+  worstStock.value
     ? {
-      labels: worstChart.value.map(p => p.date.substring(0, 10)), // extract date part of iso string
-      datasets: [{ label: 'Price in $', data: worstChart.value.map(p => p.open / 100) }]
+      labels: worstStock.value.charts?.map(p => p.date.substring(0, 10)), // extract date part of iso string
+      datasets: [{ label: 'Price in $', data: worstStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: worstStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 120 (ADX 120)', data: worstStock.value.charts?.map(p => p.adx_120)}]
     }
     : null
 );
@@ -83,21 +79,15 @@ const chartOptions = {
 /* ------------ load data once on mount ------------ */
 onMounted(async () => {
   /* parallel fetch */
-  const [best, worst] = await Promise.all([
+  const [best, worst, stocksCount] = await Promise.all([
     stocksApi.stocksGetStocks('best'),
-    stocksApi.stocksGetStocks('worst')
+    stocksApi.stocksGetStocks('worst'),
+    stocksApi.stocksGetStocksCount()
   ]);
   bestStock.value  = best.data;
   worstStock.value = worst.data;
-  const now      = new Date();
-  const weekAgo = new Date(now.getTime() - (DAY * 7));
-  const [localChartBest, localChartWorst, stocksCount] = await Promise.all([
-    chartsApi.chartsGetStockWithCharts(bestStock.value.symbol),
-    chartsApi.chartsGetStockWithCharts(worstStock.value.symbol),
-    stocksApi.stocksGetStocksCount()
-  ]);
-  bestChart.value = localChartBest.data.charts;
-  worstChart.value = localChartWorst.data.charts;
+  console.log("bestStock: ", bestStock.value);
+  console.log("worstStock: ", worstStock.value);
   stockCount.value = stocksCount.data
 });
 </script>
