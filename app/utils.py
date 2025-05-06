@@ -7,7 +7,7 @@ from sqlalchemy.orm import aliased
 from app.api.deps import SessionDep
 from app.models import Chart, Stock
 from app.schemas import StockPerformanceRead, ChartRead, StockRead
-from financial_mathematics.average_directional_index import calculate_adx
+from financial_mathematics.average_directional_index import calculate_adx, calculate_directional_moving_indexes
 
 
 def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time_frame: str) -> Stock:
@@ -89,7 +89,8 @@ def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time
 
 def calculate_technical_stock_data(stock: StockRead) -> StockRead:
     if len(stock.charts) < 28:
-        raise ValueError(f"Not enough chart data for symbol '{stock.symbol}' to compute ADX. Need at least 14 data points.")
+        raise ValueError(
+            f"Not enough chart data for symbol '{stock.symbol}' to compute ADX. Need at least 14 data points.")
 
     # 2. Unpack the data
     dates: List = [chart.date for chart in stock.charts]
@@ -99,11 +100,13 @@ def calculate_technical_stock_data(stock: StockRead) -> StockRead:
     closes: List[int] = [chart.close for chart in stock.charts]
     volumes: List[int] = [chart.volume for chart in stock.charts]
 
-    # 3. Calculate ADX values
-    adx_14_list = calculate_adx(highs, lows, closes, period=14)
-    adx_120_list = None
+    # 3. Calculate technical indicators
+    adx_14, dmi_positive_14, dmi_negative_14 = calculate_adx(highs, lows, closes, period=14)
+    adx_120 = None
+    dmi_positive_120 = None
+    dmi_negative_120 = None
     if len(stock.charts) >= 134:
-        adx_120_list = calculate_adx(highs, lows, closes, period=120)
+        adx_120, dmi_positive_120, dmi_negative_120 = calculate_adx(highs, lows, closes, period=120)
 
     charts: List[ChartRead] = list()
     for i in range(len(dates)):
@@ -116,8 +119,12 @@ def calculate_technical_stock_data(stock: StockRead) -> StockRead:
                 low=lows[i],
                 close=closes[i],
                 volume=volumes[i],
-                adx_14=adx_14_list[i-28] if i >= 28 else None,
-                adx_120=adx_120_list[i-134] if adx_120_list and i >= 134 else None,
+                adx_14=adx_14[i - 28] if i >= 28 else None,
+                adx_120=adx_120[i - 28] if adx_120 and i >= 134 else None,
+                dmi_positive_14=dmi_positive_14[i - 14] if i >= 14 else None,
+                dmi_negative_14=dmi_negative_14[i - 14] if i >= 14 else None,
+                dmi_positive_120=dmi_positive_120[i - 14] if dmi_positive_120 and i >= 120 else None,
+                dmi_negative_120=dmi_negative_120[i - 14] if dmi_negative_120 and i >= 120 else None,
             )
         )
     stock.charts = charts
@@ -187,7 +194,8 @@ def get_stock_performance(session, stock_symbol: str, start_time: datetime, is_b
 
     if row is None:
         return None
-    charts: List[Chart] = session.execute(select(Chart).where(Chart.symbol == stock_symbol).order_by(Chart.date)).scalars().all()
+    charts: List[Chart] = session.execute(
+        select(Chart).where(Chart.symbol == stock_symbol).order_by(Chart.date)).scalars().all()
     charts_read: List[ChartRead] = [ChartRead.model_validate(chart) for chart in charts]
     return StockPerformanceRead(
         symbol=row.symbol,

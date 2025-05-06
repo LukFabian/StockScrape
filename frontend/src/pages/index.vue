@@ -55,7 +55,7 @@ const bestChartData  = computed(() =>
   bestStock.value
     ? {
       labels: bestStock.value.charts?.map(p => p.date.substring(0, 10)), // extract date part of iso string
-      datasets: [{ label: 'Price in $', data: bestStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: bestStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 14 (ADX 14)', data: bestStock.value.charts?.map(p => p.adx_120)}]
+      datasets: [{ label: 'Price in $', data: bestStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: bestStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 120 (ADX 120)', data: bestStock.value.charts?.map(p => p.adx_120)}, { label: '+DMI 14', data: bestStock.value.charts?.map(p => p.dmi_positive_14)}, { label: '-DMI 14', data: bestStock.value.charts?.map(p => p.dmi_negative_14)}, { label: '+DMI 120', data: bestStock.value.charts?.map(p => p.dmi_positive_120)}, { label: '-DMI 120', data: bestStock.value.charts?.map(p => p.dmi_negative_120)}]
     }
     : null
 );
@@ -64,7 +64,7 @@ const worstChartData = computed(() =>
   worstStock.value
     ? {
       labels: worstStock.value.charts?.map(p => p.date.substring(0, 10)), // extract date part of iso string
-      datasets: [{ label: 'Price in $', data: worstStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: worstStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 120 (ADX 120)', data: worstStock.value.charts?.map(p => p.adx_120)}]
+      datasets: [{ label: 'Price in $', data: worstStock.value.charts?.map(p => p.close / 100) }, { label: 'Average Directional Index 14 (ADX 14)', data: worstStock.value.charts?.map(p => p.adx_14)}, { label: 'Average Directional Index 120 (ADX 120)', data: worstStock.value.charts?.map(p => p.adx_120)}, { label: '+DMI 14', data: worstStock.value.charts?.map(p => p.dmi_positive_14)}, { label: '-DMI 14', data: bestStock.value.charts?.map(p => p.dmi_negative_14)}, { label: '+DMI 120', data: worstStock.value.charts?.map(p => p.dmi_positive_120)}, { label: '-DMI 120', data: worstStock.value.charts?.map(p => p.dmi_negative_120)}]
     }
     : null
 );
@@ -86,8 +86,6 @@ onMounted(async () => {
   ]);
   bestStock.value  = best.data;
   worstStock.value = worst.data;
-  console.log("bestStock: ", bestStock.value);
-  console.log("worstStock: ", worstStock.value);
   stockCount.value = stocksCount.data
 });
 </script>

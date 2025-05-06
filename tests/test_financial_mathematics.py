@@ -20,7 +20,7 @@ class TestCalculateAdx(unittest.TestCase):
                     23.7160480001222,
                     23.7675419638405]
 
-        result = calculate_adx(high, low, close, period)
+        result = calculate_adx(high, low, close, period)[0]
 
 
 class TestCalculateTrueRange(unittest.TestCase):

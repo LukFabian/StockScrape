@@ -2,10 +2,11 @@ from typing import List, Tuple
 import statistics
 
 
-def calculate_adx(high: List[int], low: List[int], close: List[int], period: int) -> List[float]:
+def calculate_adx(high: List[int], low: List[int], close: List[int], period: int) -> Tuple[List[float], List[float], List[float]]:
     """
     Calculate the Average Directional Movement Index (ADX).
-
+    Also returns the positive and negative directional movement indicator
+    (+DMI / -DMI)
     :param high: List of high prices.
     :param low: List of low prices.
     :param close: List of close prices.
@@ -27,7 +28,7 @@ def calculate_adx(high: List[int], low: List[int], close: List[int], period: int
     directional_index = calculate_directional_index(positive_directional_movement_indexes,
                                                     negative_directional_movement_indexes)
     adx = calculate_average_directional_index(directional_index, period)
-    return adx
+    return adx, positive_directional_movement_indexes, negative_directional_movement_indexes
 
 
 def calculate_true_range(high: List[int], low: List[int], close: List[int]) -> List[int]:

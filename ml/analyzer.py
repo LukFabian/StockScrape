@@ -118,8 +118,8 @@ class Analyzer:
                 low_values = [chart.low for chart in stock.charts]
                 close_values = [chart.close for chart in stock.charts]
 
-                adx_14 = average_directional_index.calculate_adx(high_values, low_values, close_values, 14)
-                adx_120 = average_directional_index.calculate_adx(high_values, low_values, close_values, 120)
+                adx_14, _, _ = average_directional_index.calculate_adx(high_values, low_values, close_values, 14)
+                adx_120, _, _ = average_directional_index.calculate_adx(high_values, low_values, close_values, 120)
 
                 # Calculate the offset between adx_14 and adx_120 lengths
                 offset = len(adx_14) - len(adx_120)
