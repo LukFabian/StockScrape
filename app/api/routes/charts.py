@@ -4,7 +4,7 @@ from fastapi import APIRouter, Path, Query, HTTPException
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from app.api.deps import SessionDep
-from app.models import Chart, Stock
+from app.models import Stock
 from app.schemas import StockRead
 
 router = APIRouter(prefix="/charts", tags=["charts"])

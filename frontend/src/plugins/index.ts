@@ -17,7 +17,7 @@ import {createVuetify} from "vuetify";
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import { Configuration } from '@/generated/configuration.ts';
-import {ChartsApi, StocksApi} from '@/generated/api.ts';
+import {ChartsApi, StockApi, StocksApi} from '@/generated/api.ts';
 import { http } from '@/lib/http';
 
 
@@ -39,6 +39,6 @@ export function registerPlugins (app: App) {
 const config = new Configuration({
   basePath: '',                 // leave empty – we hand the baseURL via axios
 });
-
+export const stockApi = new StockApi(config, undefined, http)
 export const stocksApi = new StocksApi(config, undefined, http);
 export const chartsApi = new ChartsApi(config, undefined, http);

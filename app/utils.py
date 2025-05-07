@@ -87,7 +87,7 @@ def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time
     return stock
 
 
-def calculate_technical_stock_data(stock: StockRead) -> StockRead:
+def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> StockRead | StockPerformanceRead:
     if len(stock.charts) < 28:
         raise ValueError(
             f"Not enough chart data for symbol '{stock.symbol}' to compute ADX. Need at least 14 data points.")
@@ -131,15 +131,14 @@ def calculate_technical_stock_data(stock: StockRead) -> StockRead:
     return stock
 
 
-def get_stock_performance(session, stock_symbol: str, start_time: datetime, is_best: bool) -> Optional[
-    StockPerformanceRead]:
-    # Aliases for subqueries
+def get_stocks_performance(session, stock_symbols: List[str], start_time: datetime, is_best: bool, limit: Optional[int] = None) -> List[StockPerformanceRead]:
+    # Aliases
     now_chart = aliased(Chart)
     past_chart = aliased(Chart)
     stock_now = aliased(Stock)
     stock_past = aliased(Stock)
 
-    # Subquery for latest close_now
+    # Subquery: Latest close price (now)
     now_subq = (
         select(
             stock_now.symbol.label("symbol"),
@@ -147,59 +146,61 @@ def get_stock_performance(session, stock_symbol: str, start_time: datetime, is_b
             stock_now.last_modified.label("last_modified")
         )
         .join(now_chart, now_chart.symbol == stock_now.symbol)
-        .where(stock_now.symbol == stock_symbol)
-        .order_by(now_chart.date.desc())
-        .limit(1)
+        .where(stock_now.symbol.in_(stock_symbols))
+        .order_by(stock_now.symbol, now_chart.date.desc())
+        .distinct(stock_now.symbol)
         .subquery()
     )
 
-    # Subquery for past close_past
+    # Subquery: Earliest close price (past)
     past_subq = (
         select(
             stock_past.symbol.label("symbol"),
             past_chart.close.label("close_past"),
-            stock_past.last_modified.label("last_modified")  # ✅ fixed here
+            stock_past.last_modified.label("last_modified")
         )
         .join(past_chart, past_chart.symbol == stock_past.symbol)
         .where(
-            stock_past.symbol == stock_symbol,
+            stock_past.symbol.in_(stock_symbols),
             past_chart.date >= start_time
         )
-        .order_by(past_chart.date.asc())
-        .limit(1)
+        .order_by(stock_past.symbol, past_chart.date.asc())
+        .distinct(stock_past.symbol)
         .subquery()
     )
 
-    # Final query combining both
+    # Combine and compute performance
     performance_query = (
         select(
             now_subq.c.symbol,
-            ((now_subq.c.close_now - past_subq.c.close_past) / cast(past_subq.c.close_past, Numeric) * 100).label(
-                "performance"),
+            ((now_subq.c.close_now - past_subq.c.close_past) / cast(past_subq.c.close_past, Numeric) * 100).label("performance"),
             now_subq.c.last_modified
         )
         .select_from(now_subq.join(past_subq, now_subq.c.symbol == past_subq.c.symbol))
-    ).subquery()
-
-    # Select best or worst performer
-    order_clause = desc(performance_query.c.performance) if is_best else asc(performance_query.c.performance)
-
-    row = session.execute(
-        select(
-            performance_query.c.symbol,
-            performance_query.c.performance,
-            performance_query.c.last_modified
-        ).order_by(order_clause)
-    ).first()
-
-    if row is None:
-        return None
-    charts: List[Chart] = session.execute(
-        select(Chart).where(Chart.symbol == stock_symbol).order_by(Chart.date)).scalars().all()
-    charts_read: List[ChartRead] = [ChartRead.model_validate(chart) for chart in charts]
-    return StockPerformanceRead(
-        symbol=row.symbol,
-        last_modified=row.last_modified,
-        performance=float(row.performance),
-        charts=charts_read
     )
+
+    order_clause = desc("performance") if is_best else asc("performance")
+    if limit:
+        performance_query = performance_query.order_by(order_clause).limit(limit)
+    else:
+        performance_query = performance_query.order_by(order_clause)
+
+    rows = session.execute(performance_query).all()
+
+    result = []
+    for row in rows:
+        charts: List[Chart] = session.execute(
+            select(Chart).where(Chart.symbol == row.symbol).order_by(Chart.date)
+        ).scalars().all()
+        charts_read: List[ChartRead] = [ChartRead.model_validate(chart) for chart in charts]
+
+        result.append(
+            StockPerformanceRead(
+                symbol=row.symbol,
+                last_modified=row.last_modified,
+                performance=float(row.performance),
+                charts=charts_read
+            )
+        )
+
+    return result

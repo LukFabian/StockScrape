@@ -18,7 +18,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { Line } from 'vue-chartjs';
-import { stocksApi } from '@/plugins';
+import { stockApi } from '@/plugins';
 import type {StockRead} from "@/generated";
 
 definePage({
@@ -67,7 +67,7 @@ const chartOptions = {
 };
 
 onMounted(async () => {
-  const { data } = await stocksApi.stocksGetStock(symbol, true);
+  const { data } = await stockApi.stockGetStock(symbol, true);
   stockData.value = data;
 });
 </script>
