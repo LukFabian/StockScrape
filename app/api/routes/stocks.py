@@ -17,7 +17,6 @@ router = APIRouter(prefix="/stocks", tags=["stocks"])
 async def get_all_stocks(session: SessionDep, start: Optional[datetime.datetime] = Query(None,
                                                                                          description="ISO 8601, e.g. 2025-04-24T09:30:00Z")) -> \
 List[StockPerformanceRead]:
-    start = start if start else datetime.datetime.now() - datetime.timedelta(days=7)
     symbols = session.execute(select(Stock.symbol)).scalars().all()
     results = get_stocks_performance(session, stock_symbols=symbols, start_time=start, is_best=True)
     results_with_technical_data = [calculate_technical_stock_data(result) for result in results]
@@ -28,7 +27,6 @@ List[StockPerformanceRead]:
 async def get_stocks(session: SessionDep, mode: str = Query(..., description="Choose between 'best' or 'worst'"),
                      start: Optional[datetime.datetime] = Query(None,
                                                                 description="ISO 8601, e.g. 2025-04-24T09:30:00Z")) -> StockPerformanceRead:
-    start = start if start else datetime.datetime.now() - datetime.timedelta(days=7)
     if mode not in {"best", "worst"}:
         raise HTTPException(status_code=400, detail="Invalid mode. Choose 'best' or 'worst'.")
 

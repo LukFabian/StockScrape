@@ -131,7 +131,7 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
     return stock
 
 
-def get_stocks_performance(session, stock_symbols: List[str], start_time: datetime, is_best: bool, limit: Optional[int] = None) -> List[StockPerformanceRead]:
+def get_stocks_performance(session, stock_symbols: List[str], is_best: bool, start_time: Optional[datetime] = None, limit: Optional[int] = None) -> List[StockPerformanceRead]:
     # Aliases
     now_chart = aliased(Chart)
     past_chart = aliased(Chart)
@@ -153,21 +153,37 @@ def get_stocks_performance(session, stock_symbols: List[str], start_time: dateti
     )
 
     # Subquery: Earliest close price (past)
-    past_subq = (
-        select(
-            stock_past.symbol.label("symbol"),
-            past_chart.close.label("close_past"),
-            stock_past.last_modified.label("last_modified")
+    if start_time:
+        past_subq = (
+            select(
+                stock_past.symbol.label("symbol"),
+                past_chart.close.label("close_past"),
+                stock_past.last_modified.label("last_modified")
+            )
+            .join(past_chart, past_chart.symbol == stock_past.symbol)
+            .where(
+                stock_past.symbol.in_(stock_symbols),
+                past_chart.date >= start_time
+            )
+            .order_by(stock_past.symbol, past_chart.date.asc())
+            .distinct(stock_past.symbol)
+            .subquery()
         )
-        .join(past_chart, past_chart.symbol == stock_past.symbol)
-        .where(
-            stock_past.symbol.in_(stock_symbols),
-            past_chart.date >= start_time
+    else:
+        past_subq = (
+            select(
+                stock_past.symbol.label("symbol"),
+                past_chart.close.label("close_past"),
+                stock_past.last_modified.label("last_modified")
+            )
+            .join(past_chart, past_chart.symbol == stock_past.symbol)
+            .where(
+                stock_past.symbol.in_(stock_symbols)
+            )
+            .order_by(stock_past.symbol, past_chart.date.asc())
+            .distinct(stock_past.symbol)
+            .subquery()
         )
-        .order_by(stock_past.symbol, past_chart.date.asc())
-        .distinct(stock_past.symbol)
-        .subquery()
-    )
 
     # Combine and compute performance
     performance_query = (
