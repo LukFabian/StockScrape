@@ -17,6 +17,9 @@
 
         <h3 class="mt-6">ADX & DMI</h3>
         <LineChart v-if="adxDmiChartData" :data="adxDmiChartData" :chart-options="chartOptions" />
+
+        <h3 class="mt-6">RSI</h3>
+        <LineChart v-if="adxDmiChartData" :data="rsiChartData" :chart-options="chartOptions" />
       </v-card-text>
     </v-card>
   </v-container>
@@ -79,11 +82,11 @@ const filteredCharts = computed(() => {
   if (!stockData.value) return [];
   const startDate = getStartDate(selectedTimespan.value);
   if (!startDate) return stockData.value.charts;
-  return stockData.value.charts.filter(chart => new Date(chart.date) >= startDate);
+  return stockData.value?.charts.filter(chart => new Date(chart.date) >= startDate);
 });
 
 const priceChartData = computed(() =>
-  filteredCharts.value.length
+  filteredCharts.value?.length
     ? {
       labels: filteredCharts.value.map(p => p.date.substring(0, 10)),
       datasets: [{
@@ -97,13 +100,25 @@ const priceChartData = computed(() =>
 );
 
 const adxDmiChartData = computed(() =>
-  filteredCharts.value.length
+  filteredCharts.value?.length
     ? {
       labels: filteredCharts.value.map(p => p.date.substring(0, 10)),
       datasets: [
         { label: 'ADX 14', data: filteredCharts.value.map(p => p.adx_14), borderColor: 'purple' },
         { label: '+DMI 14', data: filteredCharts.value.map(p => p.dmi_positive_14), borderColor: 'green' },
         { label: '-DMI 14', data: filteredCharts.value.map(p => p.dmi_negative_14), borderColor: 'red' }
+      ]
+    }
+    : null
+);
+
+const rsiChartData = computed(() =>
+  filteredCharts.value?.length
+    ? {
+      labels: filteredCharts.value.map(p => p.date.substring(0, 10)),
+      datasets: [
+        { label: 'RSI 14', data: filteredCharts.value.map(p => p.rsi_14), borderColor: 'purple' },
+        { label: 'RSI 120', data: filteredCharts.value.map(p => p.rsi_120), borderColor: 'green' },
       ]
     }
     : null

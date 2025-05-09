@@ -1,16 +1,20 @@
 from datetime import datetime
 from typing import List, Optional
 
+from fastapi import HTTPException
 from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased
 
 from app.api.deps import SessionDep
 from app.models import Chart, Stock
 from app.schemas import StockPerformanceRead, ChartRead, StockRead
-from financial_mathematics.average_directional_index import calculate_adx, calculate_directional_moving_indexes
+from financial_mathematics.average_directional_index import calculate_adx
+from financial_mathematics.relative_strength_index import calculate_relative_strength
 
 
 def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time_frame: str) -> Stock:
+    if stock_data.get('Error Message'):
+        raise HTTPException(status_code=400, detail=stock_data['Error Message'])
     meta_data = stock_data.get("Meta Data")
     symbol = meta_data.get("2. Symbol")
 
@@ -102,11 +106,14 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
 
     # 3. Calculate technical indicators
     adx_14, dmi_positive_14, dmi_negative_14 = calculate_adx(highs, lows, closes, period=14)
+    rsi_14 = calculate_relative_strength(closes, period=14)
     adx_120 = None
     dmi_positive_120 = None
     dmi_negative_120 = None
+    rsi_120 = None
     if len(stock.charts) >= 134:
         adx_120, dmi_positive_120, dmi_negative_120 = calculate_adx(highs, lows, closes, period=120)
+        rsi_120 = calculate_relative_strength(closes, period=120)
 
     charts: List[ChartRead] = list()
     for i in range(len(dates)):
@@ -125,6 +132,8 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
                 dmi_negative_14=dmi_negative_14[i - 14] if i >= 14 else None,
                 dmi_positive_120=dmi_positive_120[i - 14] if dmi_positive_120 and i >= 120 else None,
                 dmi_negative_120=dmi_negative_120[i - 14] if dmi_negative_120 and i >= 120 else None,
+                rsi_14=rsi_14[i - 14] if i >= 14 else None,
+                rsi_120=rsi_120[i - 14] if rsi_120 and i >= 120 else None,
             )
         )
     stock.charts = charts
