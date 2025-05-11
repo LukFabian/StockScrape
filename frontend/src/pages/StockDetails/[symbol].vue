@@ -19,7 +19,7 @@
         <LineChart v-if="adxDmiChartData" :data="adxDmiChartData" :chart-options="chartOptions" />
 
         <h3 class="mt-6">RSI</h3>
-        <LineChart v-if="adxDmiChartData" :data="rsiChartData" :chart-options="chartOptions" />
+        <LineChart v-if="rsiChartData" :data="rsiChartData" :chart-options="chartOptions" />
       </v-card-text>
     </v-card>
   </v-container>
@@ -79,7 +79,7 @@ function getStartDate(timespan: string): Date | null {
 
 // Filtered chart data based on selected timespan
 const filteredCharts = computed(() => {
-  if (!stockData.value) return [];
+  if (!stockData.value || !stockData.value?.charts) return [];
   const startDate = getStartDate(selectedTimespan.value);
   if (!startDate) return stockData.value.charts;
   return stockData.value?.charts.filter(chart => new Date(chart.date) >= startDate);
@@ -106,8 +106,11 @@ const adxDmiChartData = computed(() =>
       datasets: [
         { label: 'ADX 14', data: filteredCharts.value.map(p => p.adx_14), borderColor: 'purple' },
         { label: '+DMI 14', data: filteredCharts.value.map(p => p.dmi_positive_14), borderColor: 'green' },
-        { label: '-DMI 14', data: filteredCharts.value.map(p => p.dmi_negative_14), borderColor: 'red' }
-      ]
+        { label: '-DMI 14', data: filteredCharts.value.map(p => p.dmi_negative_14), borderColor: 'red' },
+        { label: 'ADX 120', data: filteredCharts.value.map(p => p.adx_120), borderColor: 'blue' },
+        { label: '+DMI 120', data: filteredCharts.value.map(p => p.dmi_positive_120), borderColor: 'yellow' },
+        { label: '-DMI 120', data: filteredCharts.value.map(p => p.dmi_negative_120), borderColor: 'orange' }
+      ].filter((obj) => obj.data.some(p => p !== null))
     }
     : null
 );
@@ -119,7 +122,7 @@ const rsiChartData = computed(() =>
       datasets: [
         { label: 'RSI 14', data: filteredCharts.value.map(p => p.rsi_14), borderColor: 'purple' },
         { label: 'RSI 120', data: filteredCharts.value.map(p => p.rsi_120), borderColor: 'green' },
-      ]
+      ].filter((obj) => obj.data.some(p => p !== null))   // checks if any element is not null
     }
     : null
 );
