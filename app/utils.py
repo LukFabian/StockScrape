@@ -6,15 +6,19 @@ from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased
 
 from app.api.deps import SessionDep
+from app.logger import logger
 from app.models import Chart, Stock
 from app.schemas import StockPerformanceRead, ChartRead, StockRead
 from financial_mathematics.average_directional_index import calculate_adx
 from financial_mathematics.relative_strength_index import calculate_relative_strength
 
 
-def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time_frame: str) -> Stock:
+def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time_frame: str) -> Stock | None:
     if stock_data.get('Error Message'):
         raise HTTPException(status_code=400, detail=stock_data['Error Message'])
+    if not stock_data.get("Meta Data"):
+        logger.warn(f"Rate Limit Exceeded: {stock_data.get("Information")}")
+        return None
     meta_data = stock_data.get("Meta Data")
     symbol = meta_data.get("2. Symbol")
 

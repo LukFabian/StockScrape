@@ -2,8 +2,12 @@ requests==2.32.3
 SQLAlchemy==2.0.36
 alembic==1.14.0
 fastapi[standard]==0.115.7
-scipy==1.14.1
+scipy==1.15.3
 pydantic==2.10.5
 pydantic_settings==2.7.1
 sqlmodel==0.0.22
 psycopg2-binary==2.9.10
+scikit-learn==1.7.0rc1
+pydantic-settings==2.7.1
+pytz==2025.2
+numpy==2.2.2

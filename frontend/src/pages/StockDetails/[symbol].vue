@@ -12,8 +12,20 @@
           class="mb-6"
         />
 
+        <v-select
+          v-model="selectedAnalysis"
+          :items="analysisOptions"
+          @update:modelValue="onAnalysisChange"
+          label="Select Analysis Method"
+          outlined
+          dense
+          class="mb-6"
+        />
         <h3>Performance</h3>
-        <LineChart v-if="priceChartData" :data="priceChartData" :chart-options="chartOptions" />
+        <!-- Display either the priceChart or the priceChart with predictions -->
+        <LineChart v-if="priceChartData && !priceChartWithAnalysisData" :data="priceChartData" :chart-options="chartOptions" />
+        <LineChart v-if="priceChartWithAnalysisData" :data="priceChartWithAnalysisData" :chart-options="chartOptions" />
+
 
         <h3 class="mt-6">ADX & DMI</h3>
         <LineChart v-if="adxDmiChartData" :data="adxDmiChartData" :chart-options="chartOptions" />
@@ -30,8 +42,8 @@ import { ref, computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { Chart as ChartJS, registerables } from 'chart.js';
 import { Line } from 'vue-chartjs';
-import { stockApi } from '@/plugins';
-import type { StockRead } from "@/generated";
+import {analysisApi, stockApi} from '@/plugins';
+import type {StockRead} from "@/generated";
 
 definePage({
   name: '/StockDetails/:symbol'
@@ -58,6 +70,13 @@ const timespanOptions = [
   { title: 'Max', value: 'max' },
 ];
 
+const selectedAnalysis = ref('None');
+const priceChartWithAnalysisData = ref(null);
+const analysisOptions = [
+  'None',
+  'Linear Regression'
+];
+
 // Helper function to calculate start date based on selected timespan
 function getStartDate(timespan: string): Date | null {
   const now = new Date();
@@ -77,6 +96,47 @@ function getStartDate(timespan: string): Date | null {
   return start;
 }
 
+async function onAnalysisChange(): Promise<void> {
+  const baseChart = {
+    labels: filteredCharts.value.map(p => p.date.substring(0, 10)),
+    datasets: [
+      {
+        label: 'Price in $',
+        data: filteredCharts.value.map(p => p.close / 100),
+        borderColor: 'blue',
+        backgroundColor: 'lightblue'
+      }
+    ]
+  };
+
+  // If no analysis selected, just use base price chart
+  if (selectedAnalysis.value === 'None') {
+    priceChartWithAnalysisData.value = baseChart;
+    return;
+  }
+
+  try {
+    const startDate = getStartDate(selectedTimespan.value)
+    const { data } = await analysisApi.analysisPutStockAnalysis(symbol, selectedAnalysis.value.toUpperCase(), startDate?.toISOString());
+
+    if (data.charts) {
+      const analysisData = data.charts.map(p => p.close / 100);
+
+      baseChart.datasets.push({
+        label: selectedAnalysis.value,
+        data: analysisData,
+        borderColor: 'red',
+        backgroundColor: 'blue'
+      });
+      baseChart.labels = data.charts.map(p => p.date.substring(0, 10))
+    }
+
+    priceChartWithAnalysisData.value = baseChart;
+  } catch (error) {
+    console.error('Failed to fetch analysis:', error);
+    priceChartWithAnalysisData.value = baseChart;
+  }
+}
 // Filtered chart data based on selected timespan
 const filteredCharts = computed(() => {
   if (!stockData.value || !stockData.value?.charts) return [];
@@ -89,12 +149,14 @@ const priceChartData = computed(() =>
   filteredCharts.value?.length
     ? {
       labels: filteredCharts.value.map(p => p.date.substring(0, 10)),
-      datasets: [{
-        label: 'Price in $',
-        data: filteredCharts.value.map(p => p.close / 100),
-        borderColor: 'blue',
-        backgroundColor: 'lightblue'
-      }]
+      datasets: [
+        {
+          label: 'Price in $',
+          data: filteredCharts.value.map(p => p.close / 100),
+          borderColor: 'blue',
+          backgroundColor: 'lightblue'
+        }
+      ]
     }
     : null
 );

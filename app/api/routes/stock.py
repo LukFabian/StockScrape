@@ -1,4 +1,6 @@
 from typing import Annotated, Optional
+
+import pytz
 import requests
 from fastapi import APIRouter, Path, Query, HTTPException
 from sqlalchemy import func
@@ -27,6 +29,8 @@ async def get_stock(session: SessionDep,
     if not stock:
         raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
     stock_read: StockRead = StockRead.model_validate(stock, from_attributes=True)
+    for chart in stock_read.charts:
+        chart.date = chart.date.replace(tzinfo=pytz.UTC)
     if with_technicals:
         stock_read = calculate_technical_stock_data(stock_read)
     return stock_read

@@ -11,7 +11,7 @@
         link
       >
         <v-list-item-title>{{ stock.symbol }}</v-list-item-title>
-        <v-list-item-subtitle>
+        <v-list-item-subtitle v-if="stock.charts !== undefined">
           Performance (14 days): {{ stock.performance.toFixed(2) }}% | Last Close: ${{ (stock.charts[stock.charts.length - 1].close / 100).toFixed(2) }}
         </v-list-item-subtitle>
       </v-list-item>

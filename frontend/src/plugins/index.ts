@@ -17,7 +17,7 @@ import {createVuetify} from "vuetify";
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import { Configuration } from '@/generated/configuration.ts';
-import {ChartsApi, StockApi, StocksApi} from '@/generated/api.ts';
+import {AnalysisApi, ChartsApi, StockApi, StocksApi} from '@/generated/api.ts';
 import { http } from '@/lib/http';
 
 
@@ -42,3 +42,4 @@ const config = new Configuration({
 export const stockApi = new StockApi(config, undefined, http)
 export const stocksApi = new StocksApi(config, undefined, http);
 export const chartsApi = new ChartsApi(config, undefined, http);
+export const analysisApi = new AnalysisApi(config, undefined, http);
