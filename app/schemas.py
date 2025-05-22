@@ -94,7 +94,7 @@ class StockMetricRead(BaseModel):
 
 class StockRead(BaseModel):
     symbol: str
-    last_modified: datetime
+    last_modified: datetime = datetime.now().date()
     charts: List[ChartRead] = []
     profile: Optional[StockProfileRead] = None
     metrics: List[StockMetricRead] = []
