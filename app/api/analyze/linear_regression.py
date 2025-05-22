@@ -1,5 +1,3 @@
-import pytz
-
 from app.schemas import StockRead, ChartRead
 from sklearn.linear_model import LinearRegression
 import numpy as np
@@ -34,7 +32,7 @@ def analyze_linear_regression(stock: StockRead, start: datetime, periods_to_pred
             date=future_date,
             symbol=stock.symbol,
             high=int(predicted_close),  # Simplified assumption
-            low=int(predicted_close),   # Simplified assumption
+            low=int(predicted_close),  # Simplified assumption
             open=int(predicted_close),  # Simplified assumption
             close=int(predicted_close),
             volume=0,  # No volume data for predicted

@@ -8,7 +8,8 @@ from app.api.deps import SessionDep
 from app.core.config import settings
 from app.models import Stock, Chart
 from app.schemas import StockRead
-from app.utils import calculate_technical_stock_data, process_stocks_from_alphavantage
+from app.utils import calculate_technical_stock_data, process_charts_from_alphavantage, \
+    process_stock_metadata_from_alphavantage
 
 router = APIRouter(prefix="/stock", tags=["stock"])
 
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/stock", tags=["stock"])
 @router.get("/{symbol}")
 async def get_stock(session: SessionDep,
                     symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from database")],
-                    with_technicals: Optional[bool] = Query(False, description="Also calculate the technical stock data")) -> StockRead:
+                    with_technicals: Optional[bool] = Query(False,
+                                                            description="Also calculate the technical stock data")) -> StockRead:
     stock: Stock = (
         session.query(Stock)
         .join(Chart, Stock.symbol == Chart.symbol)  # Join `Stock` with `Chart`
@@ -35,6 +37,7 @@ async def get_stock(session: SessionDep,
         stock_read = calculate_technical_stock_data(stock_read)
     return stock_read
 
+
 @router.put("/{symbol}", response_model=StockRead)
 async def put_stock(session: SessionDep,
                     symbol: Annotated[str, Path(title="The unique symbol of the stock to retrieve from alphavantage")],
@@ -51,5 +54,9 @@ async def put_stock(session: SessionDep,
             raise HTTPException(status_code=400, detail=f"wrong time_frame specified: {time_frame}")
 
     data = requests.get(request_url).json()
-    process_stocks_from_alphavantage(session, data, time_frame)
+    process_charts_from_alphavantage(session, data, time_frame)
+    request_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={symbol}&apikey={api_key}"
+    data = requests.get(request_url).json()
+    if data:
+        process_stock_metadata_from_alphavantage(session, data)
     return await get_stock(session, symbol)

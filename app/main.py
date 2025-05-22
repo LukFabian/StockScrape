@@ -21,8 +21,7 @@ async def lifespan(app: FastAPI):
         yesterday = datetime.datetime.now().date() - datetime.timedelta(days=1)
         stmt = (
             select(Stock.symbol)
-            .outerjoin(Chart, and_(Stock.symbol == Chart.symbol, Chart.date == yesterday))
-            .where(Chart.symbol == None)
+            .where(Stock.last_modified <= yesterday)
         )
         result = session.execute(stmt).scalars().all()
         for symbol in result:

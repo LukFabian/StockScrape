@@ -7,19 +7,42 @@ from sqlalchemy.orm import aliased
 
 from app.api.deps import SessionDep
 from app.logger import logger
-from app.models import Chart, Stock
+from app.models import Chart, Stock, StockMetric, StockProfile
 from app.schemas import StockPerformanceRead, ChartRead, StockRead
 from financial_mathematics.average_directional_index import calculate_adx
 from financial_mathematics.relative_strength_index import calculate_relative_strength
 
 
-def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time_frame: str) -> Stock | None:
-    if stock_data.get('Error Message'):
-        raise HTTPException(status_code=400, detail=stock_data['Error Message'])
-    if not stock_data.get("Meta Data"):
-        logger.warn(f"Rate Limit Exceeded: {stock_data.get("Information")}")
+def parse_date(date_str):
+    if not date_str:
         return None
-    meta_data = stock_data.get("Meta Data")
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def parse_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def parse_int(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def process_charts_from_alphavantage(session: SessionDep, chart_data: dict, time_frame: str) -> Stock | None:
+    if chart_data.get('Error Message'):
+        raise HTTPException(status_code=400, detail=chart_data['Error Message'])
+    if not chart_data.get("Meta Data"):
+        logger.warn(f"Rate Limit Exceeded: {chart_data.get("Information")}")
+        return None
+    meta_data = chart_data.get("Meta Data")
     symbol = meta_data.get("2. Symbol")
 
     # 1. Upsert Stock
@@ -34,11 +57,11 @@ def process_stocks_from_alphavantage(session: SessionDep, stock_data: dict, time
     # 2. Select chart series
     match time_frame:
         case "MONTHLY":
-            charts = stock_data.get("Monthly Time Series")
+            charts = chart_data.get("Monthly Time Series")
         case "WEEKLY":
-            charts = stock_data.get("Weekly Time Series")
+            charts = chart_data.get("Weekly Time Series")
         case "DAILY":
-            charts = stock_data.get("Time Series (Daily)")
+            charts = chart_data.get("Time Series (Daily)")
         case _:
             raise ValueError(f"Unknown time_frame: {time_frame}")
 
@@ -144,7 +167,91 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
     return stock
 
 
-def get_stocks_performance(session, stock_symbols: List[str], is_best: bool, start_time: Optional[datetime] = None, limit: Optional[int] = None) -> List[StockPerformanceRead]:
+def process_stock_metadata_from_alphavantage(session: SessionDep, stock_data: dict):
+    symbol = stock_data.get("Symbol")
+    if not symbol:
+        raise ValueError("Missing 'Symbol' in stock data")
+
+    # Ensure the Stock record exists or create it
+    stock = session.get(Stock, symbol)
+    now = datetime.now()
+    if not stock:
+        stock = Stock(symbol=symbol, last_modified=now)
+        session.add(stock)
+    else:
+        stock.last_modified = now
+
+    # Update or create StockProfile
+    profile = session.get(StockProfile, symbol)
+    if not profile:
+        profile = StockProfile(symbol=symbol)
+        stock.profile = profile  # sets relationship
+        session.add(profile)
+
+    profile.asset_type = stock_data.get("AssetType", "")
+    profile.name = stock_data.get("Name", "")
+    profile.description = stock_data.get("Description", "")
+    profile.cik = stock_data.get("CIK", "")
+    profile.exchange = stock_data.get("Exchange", "")
+    profile.currency = stock_data.get("Currency", "")
+    profile.country = stock_data.get("Country", "")
+    profile.sector = stock_data.get("Sector", "")
+    profile.industry = stock_data.get("Industry", "")
+    profile.address = stock_data.get("Address", "")
+    profile.official_site = stock_data.get("OfficialSite", "")
+    profile.fiscal_year_end = stock_data.get("FiscalYearEnd", "")
+
+    # Create a new StockMetric entry (assumes new metric entry per call)
+    metric = StockMetric(
+        symbol=symbol,
+        date=now,  # Timestamp for when data was collected
+        latest_quarter=parse_date(stock_data.get("LatestQuarter")),
+        market_capitalization=parse_int(stock_data.get("MarketCapitalization")),
+        ebitda=parse_int(stock_data.get("EBITDA")),
+        pe_ratio=parse_float(stock_data.get("PERatio")),
+        peg_ratio=parse_float(stock_data.get("PEGRatio")),
+        book_value=parse_float(stock_data.get("BookValue")),
+        dividend_per_share=parse_float(stock_data.get("DividendPerShare")),
+        dividend_yield=parse_float(stock_data.get("DividendYield")),
+        eps=parse_float(stock_data.get("EPS")),
+        revenue_per_share_ttm=parse_float(stock_data.get("RevenuePerShareTTM")),
+        profit_margin=parse_float(stock_data.get("ProfitMargin")),
+        operating_margin_ttm=parse_float(stock_data.get("OperatingMarginTTM")),
+        return_on_assets_ttm=parse_float(stock_data.get("ReturnOnAssetsTTM")),
+        return_on_equity_ttm=parse_float(stock_data.get("ReturnOnEquityTTM")),
+        revenue_ttm=parse_int(stock_data.get("RevenueTTM")),
+        gross_profit_ttm=parse_int(stock_data.get("GrossProfitTTM")),
+        diluted_eps_ttm=parse_float(stock_data.get("DilutedEPSTTM")),
+        quarterly_earnings_growth_yoy=parse_float(stock_data.get("QuarterlyEarningsGrowthYOY")),
+        quarterly_revenue_growth_yoy=parse_float(stock_data.get("QuarterlyRevenueGrowthYOY")),
+        analyst_target_price=parse_float(stock_data.get("AnalystTargetPrice")),
+        analyst_rating_strong_buy=parse_int(stock_data.get("AnalystRatingStrongBuy")),
+        analyst_rating_buy=parse_int(stock_data.get("AnalystRatingBuy")),
+        analyst_rating_hold=parse_int(stock_data.get("AnalystRatingHold")),
+        analyst_rating_sell=parse_int(stock_data.get("AnalystRatingSell")),
+        analyst_rating_strong_sell=parse_int(stock_data.get("AnalystRatingStrongSell")),
+        trailing_pe=parse_float(stock_data.get("TrailingPE")),
+        forward_pe=parse_float(stock_data.get("ForwardPE")),
+        price_to_sales_ratio_ttm=parse_float(stock_data.get("PriceToSalesRatioTTM")),
+        price_to_book_ratio=parse_float(stock_data.get("PriceToBookRatio")),
+        ev_to_revenue=parse_float(stock_data.get("EVToRevenue")),
+        ev_to_ebitda=parse_float(stock_data.get("EVToEBITDA")),
+        beta=parse_float(stock_data.get("Beta")),
+        fifty_two_week_high=parse_float(stock_data.get("52WeekHigh")),
+        fifty_two_week_low=parse_float(stock_data.get("52WeekLow")),
+        fifty_day_moving_average=parse_float(stock_data.get("50DayMovingAverage")),
+        two_hundred_day_moving_average=parse_float(stock_data.get("200DayMovingAverage")),
+        shares_outstanding=parse_int(stock_data.get("SharesOutstanding")),
+        dividend_date=parse_date(stock_data.get("DividendDate")),
+        ex_dividend_date=parse_date(stock_data.get("ExDividendDate")),
+    )
+
+    stock.metrics.append(metric)
+    session.commit()
+
+
+def get_stocks_performance(session, stock_symbols: List[str], is_best: bool, start_time: Optional[datetime] = None,
+                           limit: Optional[int] = None) -> List[StockPerformanceRead]:
     # Aliases
     now_chart = aliased(Chart)
     past_chart = aliased(Chart)
@@ -202,7 +309,8 @@ def get_stocks_performance(session, stock_symbols: List[str], is_best: bool, sta
     performance_query = (
         select(
             now_subq.c.symbol,
-            ((now_subq.c.close_now - past_subq.c.close_past) / cast(past_subq.c.close_past, Numeric) * 100).label("performance"),
+            ((now_subq.c.close_now - past_subq.c.close_past) / cast(past_subq.c.close_past, Numeric) * 100).label(
+                "performance"),
             now_subq.c.last_modified
         )
         .select_from(now_subq.join(past_subq, now_subq.c.symbol == past_subq.c.symbol))
