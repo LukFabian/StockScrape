@@ -23,7 +23,6 @@ async def put_stock_analysis(session: SessionDep, symbol: Annotated[str, Path(ti
             return analyze_linear_regression(await get_stock(session, symbol, with_technicals=False), start,
                                              days_to_predict)
         case "SGP LSTM":
-            return await analyze_sgp_lstm(await get_stock(session, symbol, with_technicals=True), start, session,
-                                          days_to_predict)
+            return await analyze_sgp_lstm(await get_stock(session, symbol, with_technicals=True), start, session)
         case _:
             raise HTTPException(status_code=400, detail=f"specified mode unknown: {mode}")

@@ -3,10 +3,11 @@ from datetime import datetime
 from typing import List, Tuple
 
 import numpy as np
+import tensorflow
 from gplearn.functions import make_function
+from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select
-
 from app.api.analyze.symbolic_transformer import CustomSymbolicTransformer
 from app.api.deps import SessionDep
 from app.api.routes.stock import get_stock
@@ -119,6 +120,46 @@ def normalize(stock: StockRead) -> StockRead:
     return stock
 
 
+def create_lstm_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 15):
+    """
+    Turns flat features into sequences of length `seq_len`.
+    Each X[i] is a sequence: [t-seq_len, ..., t-1]
+    Each y[i] is the target at time t
+    """
+    X_seq = []
+    y_seq = []
+
+    for i in range(seq_len, len(X)):
+        X_seq.append(X[i - seq_len:i])
+        y_seq.append(y[i])
+
+    return np.array(X_seq), np.array(y_seq)
+
+
+def split_dataset(X, y, train_frac=0.7, val_frac=0.15):
+    n = len(X)
+    train_end = int(n * train_frac)
+    val_end = train_end + int(n * val_frac)
+
+    return (
+        X[:train_end], y[:train_end],  # train
+        X[train_end:val_end], y[train_end:val_end],  # val
+        X[val_end:], y[val_end:]  # test
+    )
+
+
+def build_lstm_model(input_shape):
+    model = tensorflow.keras.models.Sequential()
+    model.add(tensorflow.keras.layers.Input(shape=input_shape))
+    model.add(tensorflow.keras.layers.LSTM(64, return_sequences=True))
+    model.add(tensorflow.keras.layers.LSTM(32))
+    model.add(tensorflow.keras.layers.Dense(16, activation='relu'))
+    model.add(tensorflow.keras.layers.Dense(1, activation='sigmoid'))  # binary classification
+
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
+
+
 class SgpLSTM:
     def __init__(self, session_dep: SessionDep):
         self.session = session_dep
@@ -201,8 +242,7 @@ class SgpLSTM:
         return X, y_binary, y_return, feature_cols
 
 
-async def analyze_sgp_lstm(stock: StockRead, start: datetime, session: SessionDep,
-                           periods_to_predict: int = 14) -> StockRead:
+async def analyze_sgp_lstm(stock: StockRead, start: datetime, session: SessionDep) -> StockRead:
     sgp_lstm = SgpLSTM(session)
     await sgp_lstm.load_features()
     X_train, y_binary, y_return, feature_names = sgp_lstm.prepare_training_data(window=5)
@@ -215,7 +255,7 @@ async def analyze_sgp_lstm(stock: StockRead, start: datetime, session: SessionDe
         population_size=1000,
         hall_of_fame=100,
         n_components=50,
-        function_set=['add', 'sub', 'mul', 'div', 'neg', 'sqrt', 'log'],
+        function_set=function_set,
         parsimony_coefficient=0.0005,
         max_samples=0.9,
         verbose=1,
@@ -225,5 +265,20 @@ async def analyze_sgp_lstm(stock: StockRead, start: datetime, session: SessionDe
 
     cst.fit(X_scaled, y_binary)
     X_sgp = cst.transform(X_scaled)
+    X_sgp_rolled = apply_rolling_features(X_sgp, windows=(3, 5, 10, 20))
+    X_lstm, y_lstm = create_lstm_sequences(X_sgp_rolled, y_binary, seq_len=15)
+    X_train, y_train, X_val, y_val, X_test, y_test = split_dataset(X_lstm, y_lstm)
+
+    model = build_lstm_model(input_shape=X_train.shape[1:])
+    model.summary()
+
+    # Train
+    model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=10, batch_size=64)
+
+    y_pred_probs = model.predict(X_test).ravel()
+    y_pred_classes = (y_pred_probs > 0.5).astype(int)
+
+    print(classification_report(y_test, y_pred_classes))
+    print("ROC AUC:", roc_auc_score(y_test, y_pred_probs))
 
     return StockRead(symbol="TSLA")  # todo: remove me
