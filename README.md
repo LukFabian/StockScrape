@@ -55,3 +55,26 @@ To stop the Docker containers, run:
 ```sh
 docker compose down
 ```
+
+# Features
+
+## SGP-LSTM Stock Return Prediction
+
+### Hybrid SGP + LSTM Model
+Combines Symbolic Genetic Programming (SGP) for feature generation with LSTM networks for time-series forecasting.  
+Inspired by [this research paper](https://www.nature.com/articles/s41598-023-50783-0).
+
+### Technical Indicator Support
+Leverages ADX, DMI, and RSI to inform predictive features.
+
+### Cross-Sectional Return Forecasting
+Classifies future returns as above or below the median over a specified window.
+
+### High Predictive Performance
+Demonstrated accuracy improvements over traditional methods.
+
+### Multi-Stock Scalability
+Handles large volumes of stock data for broad market analysis.
+
+### Frontend Integration
+Outputs are easily visualized via connected Vue.js components.
