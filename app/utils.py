@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import List, Optional
-
 from fastapi import HTTPException
 from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased

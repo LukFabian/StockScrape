@@ -7,8 +7,10 @@ pydantic==2.10.5
 pydantic_settings==2.7.1
 sqlmodel==0.0.22
 psycopg2-binary==2.9.10
-scikit-learn==1.7.0rc1
+scikit-learn==1.5.2     # 1.5.2 is needed for compatability with gplearn 0.4.2
 pydantic-settings==2.7.1
 pytz==2025.2
 numpy==2.2.2
 pandas==2.2.3
+gplearn==0.4.2
+joblib==1.5.0

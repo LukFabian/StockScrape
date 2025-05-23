@@ -51,7 +51,7 @@ class DatabaseManager:
 
     def _get_latest_alembic_version(self):
         """
-        Fetch the latest Alembic version from the migrations directory.
+        Fetch the latest Alembic version from the migrations' directory.
         """
         try:
             alembic_cfg = Config(self.alembic_config_path)
