@@ -105,3 +105,7 @@ class StockRead(BaseModel):
 
 class StockPerformanceRead(StockRead):
     performance: float
+
+class ClassificationPrediction(BaseModel):
+    label: int
+    probability: float
