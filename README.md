@@ -33,7 +33,13 @@ alembic upgrade head
 ```
 This will update your database to the newest version
 
-### 5. Run the FastAPI Application
+
+### 5. Setup Playwright
+```sh
+playwright install firefox chromium
+```
+
+### 6. Run the FastAPI Application
 ```sh
 fastapi dev app/main.py
 ```
