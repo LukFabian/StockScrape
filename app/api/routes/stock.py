@@ -34,7 +34,7 @@ async def get_stock(session: SessionDep,
     for chart in stock_read.charts:
         chart.date = chart.date.replace(tzinfo=pytz.UTC)
     if with_technicals:
-        stock_read = calculate_technical_stock_data(stock_read)
+        stock_read = calculate_technical_stock_data(stock_read, session)
     return stock_read
 
 

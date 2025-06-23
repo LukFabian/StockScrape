@@ -3,12 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from app.api.deps import db_manager
 from app.api.main import api_router
 from app.api.routes.stock import put_stock
 from app.core.config import settings
-from app.models import Stock, Chart
+from app.models import Stock
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:

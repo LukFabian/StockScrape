@@ -1,5 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
+
+import pandas as pd
 from fastapi import HTTPException
 from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased
@@ -119,52 +121,72 @@ def process_charts_from_alphavantage(session: SessionDep, chart_data: dict, time
     return stock
 
 
-def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> StockRead | StockPerformanceRead:
+def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead, session: SessionDep) -> StockRead | StockPerformanceRead:
     if len(stock.charts) < 28:
         raise ValueError(
-            f"Not enough chart data for symbol '{stock.symbol}' to compute ADX. Need at least 14 data points.")
-
-    # 2. Unpack the data
-    dates: List = [chart.date for chart in stock.charts]
-    highs: List[int] = [chart.high for chart in stock.charts]
-    opens: List[int] = [chart.open for chart in stock.charts]
-    lows: List[int] = [chart.low for chart in stock.charts]
-    closes: List[int] = [chart.close for chart in stock.charts]
-    volumes: List[int] = [chart.volume for chart in stock.charts]
-
-    # 3. Calculate technical indicators
-    adx_14 = ta.adx(highs, lows, closes, length=14)
-    rsi_14 = ta.rsi(highs, lows, closes, length=14)
-    dmi_14 = ta.dm(highs, lows, length=14)
-    adx_120 = None
-    dmi_120 = None
-    rsi_120 = None
-    if len(stock.charts) >= 120:
-        adx_120 = ta.adx(highs, lows, closes, length=120)
-        dmi_120 = ta.dm(highs, lows, length=120)
-        rsi_120 = ta.rsi(highs, lows, closes, length=120)
-    charts: List[ChartRead] = list()
-    for i in range(len(dates)):
-        charts.append(
-            ChartRead(
-                symbol=stock.symbol,
-                date=dates[i],
-                high=highs[i],
-                open=opens[i],
-                low=lows[i],
-                close=closes[i],
-                volume=volumes[i],
-                adx_14=adx_14[i - 14] if i >= 14 else None,
-                adx_120=adx_120[i - 14] if adx_120 and i >= 134 else None,
-                dmi_14=dmi_14[i - 14] if i >= 14 else None,
-                dmi_120=dmi_120[i - 120] if rsi_120 and i >= 134 else None,
-                rsi_14=rsi_14[i - 14] if i >= 14 else None,
-                rsi_120=rsi_120[i - 14] if rsi_120 and i >= 120 else None,
-            )
+            f"Not enough chart data for symbol '{stock.symbol}' to compute indicators. Need at least 14 data points."
         )
-    stock.charts = charts
-    return stock
 
+    # Unpack and convert price data to float (decimal dollars)
+    data = {
+        "date": [chart.date for chart in stock.charts],
+        "open": [chart.open / 100 for chart in stock.charts],
+        "high": [chart.high / 100 for chart in stock.charts],
+        "low": [chart.low / 100 for chart in stock.charts],
+        "close": [chart.close / 100 for chart in stock.charts],
+        "volume": [chart.volume for chart in stock.charts],
+    }
+
+    df = pd.DataFrame(data)
+
+    # Compute 14-period indicators
+    df["adx_14"] = ta.adx(df["high"], df["low"], df["close"], length=14)["ADX_14"]
+    df["rsi_14"] = ta.rsi(df["close"], length=14)
+    dmi_14 = ta.dm(df["high"], df["low"], length=14)
+    df["dmi_plus_14"] = dmi_14["DMP_14"]
+    df["dmi_minus_14"] = dmi_14["DMN_14"]
+
+    # Compute 120-period indicators if possible
+    if len(df) >= 120:
+        df["adx_120"] = ta.adx(df["high"], df["low"], df["close"], length=120)["ADX_120"]
+        df["rsi_120"] = ta.rsi(df["close"], length=120)
+        dmi_120 = ta.dm(df["high"], df["low"], length=120)
+        df["dmi_plus_120"] = dmi_120["DMP_120"]
+        df["dmi_minus_120"] = dmi_120["DMN_120"]
+    else:
+        df["adx_120"] = None
+        df["rsi_120"] = None
+        df["dmi_plus_120"] = None
+        df["dmi_minus_120"] = None
+
+    # Build ChartRead list
+    chart_objects = []
+    for _, row in df.iterrows():
+        chart = Chart(
+            symbol=stock.symbol,
+            date=row["date"],
+            open=int(row["open"] * 100),
+            high=int(row["high"] * 100),
+            low=int(row["low"] * 100),
+            close=int(row["close"] * 100),
+            volume=int(row["volume"]),
+            adx_14=row["adx_14"] if pd.notna(row["adx_14"]) else None,
+            adx_120=row["adx_120"] if pd.notna(row["adx_120"]) else None,
+            rsi_14=row["rsi_14"] if pd.notna(row["rsi_14"]) else None,
+            rsi_120=row["rsi_120"] if pd.notna(row["rsi_120"]) else None,
+            dmi_plus_14=row["dmi_plus_14"] if pd.notna(row["dmi_plus_14"]) else None,
+            dmi_minus_14=row["dmi_minus_14"] if pd.notna(row["dmi_minus_14"]) else None,
+            dmi_plus_120=row["dmi_plus_120"] if pd.notna(row["dmi_plus_120"]) else None,
+            dmi_minus_120=row["dmi_minus_120"] if pd.notna(row["dmi_minus_120"]) else None,
+        )
+        chart_objects.append(chart)
+
+    # Optionally delete existing charts if you want to overwrite
+    session.query(Chart).filter(Chart.symbol == stock.symbol).delete()
+
+    session.add_all(chart_objects)
+
+    return stock
 
 def process_stock_metadata_from_alphavantage(session: SessionDep, stock_data: dict):
     symbol = stock_data.get("Symbol")

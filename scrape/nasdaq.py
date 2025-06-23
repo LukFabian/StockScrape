@@ -4,7 +4,7 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import requests
 import pathlib
-# BDay is business day, not birthday...
+# BDay is business day, not birthday
 from pandas.tseries.offsets import BDay
 from app.api.deps import SessionDep
 from app.models import Stock, Chart

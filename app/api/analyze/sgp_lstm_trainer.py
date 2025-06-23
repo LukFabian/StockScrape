@@ -1,3 +1,6 @@
+import asyncio
+from asyncio import as_completed
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from typing import Tuple, List
 
@@ -7,12 +10,14 @@ import tensorflow
 from gplearn.functions import make_function
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import select
+from sqlalchemy import select, or_
 
 from app.api.analyze.symbolic_transformer import CustomSymbolicTransformer
 from app.api.deps import SessionDep
+from sqlalchemy.orm import sessionmaker
 from app.api.routes.stock import get_stock
-from app.models import Stock
+from app.logger import logger
+from app.models import Stock, Chart
 from app.schemas import StockRead, ChartRead
 
 
@@ -27,12 +32,14 @@ def apply_rolling_features(x_sgp: np.ndarray, windows=(3, 5, 10, 20)):
         features.append(rolled)
     return np.concatenate(features, axis=1)
 
+
 # Safe division
 def _safe_div(x1, x2):
     result = np.ones_like(x1, dtype=np.float64)  # default to 1.0
     mask = np.abs(x2) > 1e-6
     result[mask] = np.divide(x1[mask], x2[mask])
     return result
+
 
 def normalize(stock: StockRead) -> StockRead:
     """
@@ -54,10 +61,10 @@ def normalize(stock: StockRead) -> StockRead:
         "volume": c.volume,
         "adx_14": c.adx_14,
         "adx_120": c.adx_120,
-        "dmi_positive_14": c.dmi_positive_14,
-        "dmi_negative_14": c.dmi_negative_14,
-        "dmi_positive_120": c.dmi_positive_120,
-        "dmi_negative_120": c.dmi_negative_120,
+        "dmi_plus_14": c.dmi_plus_14,
+        "dmi_minus_14": c.dmi_minus_14,
+        "dmi_positive_120": c.dmi_plus_120,
+        "dmi_negative_120": c.dmi_minus_120,
         "rsi_14": c.rsi_14,
         "rsi_120": c.rsi_120,
     } for c in stock.charts])
@@ -82,7 +89,7 @@ def normalize(stock: StockRead) -> StockRead:
     # 7) Forward-fill all indicators
     for col in (
             "adx_14", "adx_120",
-            "dmi_positive_14", "dmi_negative_14",
+            "dmi_plus_14", "dmi_minus_14",
             "dmi_positive_120", "dmi_negative_120",
             "rsi_14", "rsi_120"
     ):
@@ -100,8 +107,8 @@ def normalize(stock: StockRead) -> StockRead:
             volume=int(row.volume),
             adx_14=row.adx_14,
             adx_120=row.adx_120,
-            dmi_positive_14=row.dmi_positive_14,
-            dmi_negative_14=row.dmi_negative_14,
+            dmi_plus_14=row.dmi_plus_14,
+            dmi_minus_14=row.dmi_minus_14,
             dmi_positive_120=row.dmi_positive_120,
             dmi_negative_120=row.dmi_negative_120,
             rsi_14=row.rsi_14,
@@ -159,21 +166,58 @@ function_set = ['add', 'sub', 'mul', safe_div, 'log', 'sqrt', 'neg', 'abs']
 
 
 class SgpLSTMTrainer:
-    def __init__(self, session: SessionDep):
+    def __init__(self, session: SessionDep, sessionmaker: sessionmaker):
         self.session = session
         self.model = None
         self.scaler = StandardScaler()
         self.cst = None
         self.feature_cols = None
         self.trained = False
-        self.stocks: List[StockRead] = []
+        self.sessionmaker = sessionmaker
 
-    async def load_features(self):
+    def stock_needs_technicals(self, symbol: str) -> bool:
+        """Checks if a stock has any charts missing technical indicators."""
+        return self.session.execute(
+            select(Chart)
+            .where(Chart.symbol == symbol)
+            .where(
+                or_(
+                    Chart.adx_14.is_(None),
+                    Chart.rsi_14.is_(None),
+                    Chart.dmi_plus_14.is_(None),
+                    Chart.dmi_minus_14.is_(None),
+                    Chart.adx_120.is_(None),
+                    Chart.rsi_120.is_(None),
+                    Chart.dmi_plus_120.is_(None),
+                    Chart.dmi_minus_120.is_(None),
+                )
+            )
+            .limit(1)
+        ).scalar_one_or_none() is not None
+
+    def calculate_and_commit(self, sessionmaker, symbol: str):
+        with sessionmaker() as session:
+            if not self.stock_needs_technicals(symbol):
+                return
+
+            try:
+                asyncio.run(get_stock(session, symbol, with_technicals=True))
+                session.commit()
+            except Exception as e:
+                logger.warning(f"Could not load stock {symbol}: {e}")
+                session.rollback()
+
+    def load_features(self, max_workers: int = 8):
         symbols = self.session.execute(select(Stock.symbol)).scalars().all()
-        for symbol in symbols:
-            stock = await get_stock(self.session, symbol, with_technicals=True)
-            normalized_stock = normalize(stock)
-            self.stocks.append(normalized_stock)
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(self.calculate_and_commit, self.sessionmaker, symbol)
+                for symbol in symbols
+            ]
+            for future in as_completed(futures):
+                future.result()
+
 
     def prepare_training_data(self, window: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
         """
@@ -186,24 +230,25 @@ class SgpLSTMTrainer:
         """
         feature_cols = [
             "close", "volume",
-            "adx_14", "dmi_positive_14",
-            "dmi_negative_14", "rsi_14"
+            "adx_14", "dmi_plus_14",
+            "dmi_minus_14", "rsi_14"
         ]
 
         X_all = []
         y_binary_all = []
         y_return_all = []
 
-        for stock in self.stocks:
+        for stock in self.session.query(Stock).all():
+            normalized_stock = normalize(stock)
             df = pd.DataFrame([{
                 "date": c.date,
                 "close": c.close,
                 "volume": c.volume,
                 "adx_14": c.adx_14,
-                "dmi_positive_14": c.dmi_positive_14,
-                "dmi_negative_14": c.dmi_negative_14,
+                "dmi_plus_14": c.dmi_plus_14,
+                "dmi_minus_14": c.dmi_minus_14,
                 "rsi_14": c.rsi_14,
-            } for c in stock.charts])
+            } for c in normalized_stock.charts])
 
             df.set_index("date", inplace=True)
             df.sort_index(inplace=True)
@@ -234,6 +279,7 @@ class SgpLSTMTrainer:
         y_return = np.concatenate(y_return_all)
 
         return X, y_binary, y_return, feature_cols
+
 
     async def train(self, window: int = 5, seq_len: int = 15):
         await self.load_features()
@@ -271,6 +317,7 @@ class SgpLSTMTrainer:
 
         self.trained = True
 
+
     def predict(self, stock: StockRead, seq_len: int = 15) -> Tuple[float, int]:
         if not self.trained or self.model is None or self.cst is None:
             raise RuntimeError("Model is not trained. Call `train()` first.")
@@ -281,8 +328,8 @@ class SgpLSTMTrainer:
             "close": c.close,
             "volume": c.volume,
             "adx_14": c.adx_14,
-            "dmi_positive_14": c.dmi_positive_14,
-            "dmi_negative_14": c.dmi_negative_14,
+            "dmi_plus_14": c.dmi_plus_14,
+            "dmi_minus_14": c.dmi_minus_14,
             "rsi_14": c.rsi_14,
         } for c in normalized_stock.charts])
 

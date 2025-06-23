@@ -5,7 +5,7 @@ from fastapi import APIRouter, Query, Path, HTTPException
 
 from app.api.analyze.linear_regression import analyze_linear_regression
 from app.api.analyze.sgp_lstm import analyze_sgp_lstm
-from app.api.deps import SessionDep
+from app.api.deps import SessionDep, db_manager
 from app.api.routes.stock import get_stock
 from app.schemas import StockRead, ClassificationPrediction
 
@@ -29,11 +29,12 @@ async def put_stock_analysis_regression(session: SessionDep,
 
 @router.put("stock/classification/{symbol}")
 async def put_stock_analysis_classification(session: SessionDep,
-                                        symbol: Annotated[str, Path(title="The unique symbol of the stock")],
-                                        mode: str = Query(...,
-                                                          description="Choose 'SGP LSTM'")) -> ClassificationPrediction:
+                                            symbol: Annotated[str, Path(title="The unique symbol of the stock")],
+                                            mode: str = Query(...,
+                                                              description="Choose 'SGP LSTM'")) -> ClassificationPrediction:
     match mode:
         case "SGP LSTM":
-            return await analyze_sgp_lstm(await get_stock(session, symbol, with_technicals=True), session)
+            return await analyze_sgp_lstm(await get_stock(session, symbol, with_technicals=True), session,
+                                          db_manager.SessionLocal)
         case _:
             raise HTTPException(status_code=400, detail=f"specified mode unknown: {mode}")

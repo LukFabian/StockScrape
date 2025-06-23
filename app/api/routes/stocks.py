@@ -19,7 +19,7 @@ async def get_all_stocks(session: SessionDep, start: Optional[datetime.datetime]
 List[StockPerformanceRead]:
     symbols = session.execute(select(Stock.symbol)).scalars().all()
     results = get_stocks_performance(session, stock_symbols=symbols, start_time=start, is_best=True)
-    results_with_technical_data = [calculate_technical_stock_data(result) for result in results]
+    results_with_technical_data = [calculate_technical_stock_data(result, session) for result in results]
     return results_with_technical_data
 
 
@@ -35,7 +35,7 @@ async def get_stocks(session: SessionDep, mode: str = Query(..., description="Ch
     if len(results) == 0:
         raise HTTPException(status_code=404, detail=f"stock not found with symbol: {symbol}")
     result = results[0]
-    result_stock_with_technical_data = calculate_technical_stock_data(result)
+    result_stock_with_technical_data = calculate_technical_stock_data(result, session)
     return result_stock_with_technical_data
 
 
