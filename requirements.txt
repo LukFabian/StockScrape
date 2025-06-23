@@ -16,5 +16,4 @@ gplearn==0.4.2
 joblib==1.5.0
 keras==3.10.0
 tensorflow==2.19.0  # this can be exchanged with the following for nvidia gpu(s): tensorflow[and-cuda]==2.19.0
-scrapy-playwright==0.0.43
-
+pandas-ta==0.3.14b

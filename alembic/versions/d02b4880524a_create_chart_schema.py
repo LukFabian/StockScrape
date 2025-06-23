@@ -27,6 +27,12 @@ def upgrade() -> None:
         sa.Column('volume', sa.BigInteger(), nullable=False),
         sa.Column('date', sa.Date(), primary_key=True, nullable=False),
         sa.Column('symbol', sa.VARCHAR(), sa.ForeignKey('stock.symbol'), primary_key=True, nullable=False),
+        sa.Column('adx_14', sa.Float(), nullable=True),
+        sa.Column('adx_120', sa.Float(), nullable=True),
+        sa.Column('dmi_14', sa.Float(), nullable=True),
+        sa.Column('dmi_120', sa.Float(), nullable=True),
+        sa.Column('rsi_14', sa.Float(), nullable=True),
+        sa.Column('rsi_120', sa.Float(), nullable=True),
     )
 
 

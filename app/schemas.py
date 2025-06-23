@@ -13,10 +13,8 @@ class ChartRead(BaseModel):
     volume: int
     adx_14: Optional[float] = None
     adx_120: Optional[float] = None
-    dmi_positive_14: Optional[float] = None
-    dmi_negative_14: Optional[float] = None
-    dmi_positive_120: Optional[float] = None
-    dmi_negative_120: Optional[float] = None
+    dmi_14: Optional[float] = None
+    dmi_120: Optional[float] = None
     rsi_14: Optional[float] = None
     rsi_120: Optional[float] = None
 

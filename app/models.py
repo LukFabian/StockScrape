@@ -1,7 +1,7 @@
 from typing import List, Optional
 from datetime import datetime
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, String, DateTime, Integer
+from sqlalchemy import ForeignKey, String, DateTime, Integer, Float
 
 
 class Base(DeclarativeBase):
@@ -40,6 +40,12 @@ class Chart(Base):
     open: Mapped[int] = mapped_column(Integer, nullable=False)
     close: Mapped[int] = mapped_column(Integer, nullable=False)
     volume: Mapped[int] = mapped_column(Integer, nullable=False)
+    adx_14: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
+    adx_120: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
+    dmi_14: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
+    dmi_120: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
+    rsi_14: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
+    rsi_120: Mapped[Optional[float]] = mapped_column(Float, nullable=False)
 
     stock: Mapped["Stock"] = relationship(back_populates="charts")
 

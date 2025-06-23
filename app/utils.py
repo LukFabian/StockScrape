@@ -3,7 +3,9 @@ from typing import List, Optional
 from fastapi import HTTPException
 from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased
-
+import numpy as np
+setattr(np, "NaN", np.nan)
+import pandas_ta as ta
 from app.api.deps import SessionDep
 from app.logger import logger
 from app.models import Chart, Stock, StockMetric, StockProfile
@@ -131,16 +133,16 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
     volumes: List[int] = [chart.volume for chart in stock.charts]
 
     # 3. Calculate technical indicators
-    adx_14, dmi_positive_14, dmi_negative_14 = calculate_adx(highs, lows, closes, period=14)
-    rsi_14 = calculate_relative_strength(closes, period=14)
+    adx_14 = ta.adx(highs, lows, closes, length=14)
+    rsi_14 = ta.rsi(highs, lows, closes, length=14)
+    dmi_14 = ta.dm(highs, lows, length=14)
     adx_120 = None
-    dmi_positive_120 = None
-    dmi_negative_120 = None
+    dmi_120 = None
     rsi_120 = None
-    if len(stock.charts) >= 134:
-        adx_120, dmi_positive_120, dmi_negative_120 = calculate_adx(highs, lows, closes, period=120)
-        rsi_120 = calculate_relative_strength(closes, period=120)
-
+    if len(stock.charts) >= 120:
+        adx_120 = ta.adx(highs, lows, closes, length=120)
+        dmi_120 = ta.dm(highs, lows, length=120)
+        rsi_120 = ta.rsi(highs, lows, closes, length=120)
     charts: List[ChartRead] = list()
     for i in range(len(dates)):
         charts.append(
@@ -152,12 +154,10 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead) -> S
                 low=lows[i],
                 close=closes[i],
                 volume=volumes[i],
-                adx_14=adx_14[i - 28] if i >= 28 else None,
-                adx_120=adx_120[i - 28] if adx_120 and i >= 134 else None,
-                dmi_positive_14=dmi_positive_14[i - 14] if i >= 14 else None,
-                dmi_negative_14=dmi_negative_14[i - 14] if i >= 14 else None,
-                dmi_positive_120=dmi_positive_120[i - 14] if dmi_positive_120 and i >= 120 else None,
-                dmi_negative_120=dmi_negative_120[i - 14] if dmi_negative_120 and i >= 120 else None,
+                adx_14=adx_14[i - 14] if i >= 14 else None,
+                adx_120=adx_120[i - 14] if adx_120 and i >= 134 else None,
+                dmi_14=dmi_14[i - 14] if i >= 14 else None,
+                dmi_120=dmi_120[i - 120] if rsi_120 and i >= 134 else None,
                 rsi_14=rsi_14[i - 14] if i >= 14 else None,
                 rsi_120=rsi_120[i - 14] if rsi_120 and i >= 120 else None,
             )
