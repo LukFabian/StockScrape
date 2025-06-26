@@ -35,7 +35,7 @@ class DatabaseManager:
         Creates the SQLAlchemy engine and session factory.
         """
         try:
-            self.engine = create_engine(self.db_url, echo=False)
+            self.engine = create_engine(self.db_url, echo=False, pool_size=20, max_overflow=30)
             self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
             print("[INFO] Database engine initialized successfully.")
         except Exception as e:

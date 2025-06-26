@@ -3,7 +3,7 @@ from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -12,7 +12,7 @@ from gplearn.functions import make_function
 from pandas._libs.tslibs.offsets import BDay
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.preprocessing import StandardScaler
-from sqlalchemy import select, or_, update
+from sqlalchemy import select, or_
 
 from app.api.analyze.symbolic_transformer import CustomSymbolicTransformer
 from app.api.deps import SessionDep
@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker, selectinload
 from app.api.routes.stock import get_stock
 from app.logger import logger
 from app.models import Stock, Chart
-from app.schemas import StockRead, ChartRead
+from app.schemas import StockRead
 
 
 def apply_rolling_features(x_sgp: np.ndarray, windows=(3, 5, 10, 20)):
@@ -132,6 +132,56 @@ def normalize(stock: Stock) -> Stock:
     stock.last_modified = datetime.now().date()
 
     return stock
+
+def normalize_if_needed(session_factory: sessionmaker, symbol: str) -> Optional[str]:
+    """Loads a single Stock by symbol, normalizes if incomplete, and returns the symbol if normalized."""
+    session = session_factory()
+    try:
+        stock = session.execute(
+            select(Stock)
+            .options(selectinload(Stock.charts))
+            .where(Stock.symbol == symbol)
+        ).scalar_one_or_none()
+
+        if not stock or not stock.charts:
+            return None
+
+        # Check for missing business days
+        chart_dates = sorted(c.date for c in stock.charts)
+        expected = set(pd.bdate_range(chart_dates[0], chart_dates[-1]).date)
+        actual = set(chart_dates)
+
+        if len(expected - actual) > 0:
+            # missing days ⇒ normalize & merge
+            normalized = normalize(stock)
+            logger.info(f"Normalized {symbol}")
+            session.merge(normalized)
+            session.commit()
+            return symbol
+        return None
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+def batch_normalize_all(session: SessionDep, session_factory: sessionmaker, max_workers: int = 16):
+    """Normalize all stocks in parallel, up to max_workers threads."""
+    # fetch all symbols up front in the main thread
+    symbols = session.execute(select(Stock.symbol)).scalars().all()
+    session.close()
+
+    normalized = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(normalize_if_needed, session_factory, sym): sym for sym in symbols}
+        for fut in as_completed(futures):
+            result = fut.result()
+            if result:
+                normalized.append(result)
+    if len(normalized) > 0:
+        print(f"Normalized {len(normalized)} stocks: {normalized}")
+
 
 
 def create_lstm_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 15):
@@ -253,7 +303,7 @@ class SgpLSTMTrainer:
         X_all = []
         y_binary_all = []
         y_return_all = []
-
+        batch_normalize_all(self.session, self.sessionmaker, max_workers=8)
         stock_symbols = self.session.execute(select(Stock.symbol)).scalars().all()
 
         for symbol in stock_symbols:
@@ -266,22 +316,6 @@ class SgpLSTMTrainer:
 
             if not stock or not stock.charts:
                 continue
-            # Extract dates and check for missing business days
-            chart_dates = sorted([chart.date.date() for chart in stock.charts])
-            min_date = chart_dates[0]
-            max_date = chart_dates[-1]
-
-            expected_dates = pd.bdate_range(min_date, max_date).date
-            actual_dates = set(chart_dates)
-
-            is_incomplete = any(d not in actual_dates for d in expected_dates)
-
-            if is_incomplete:
-                normalized_stock = normalize(stock)
-                self.session.merge(normalized_stock)
-                self.session.commit()
-            else:
-                normalized_stock = stock
 
             df = pd.DataFrame([{
                 "date": c.date,
@@ -291,7 +325,7 @@ class SgpLSTMTrainer:
                 "dmi_plus_14": c.dmi_plus_14,
                 "dmi_minus_14": c.dmi_minus_14,
                 "rsi_14": c.rsi_14,
-            } for c in normalized_stock.charts])
+            } for c in stock.charts])
 
             df.set_index("date", inplace=True)
             df.sort_index(inplace=True)

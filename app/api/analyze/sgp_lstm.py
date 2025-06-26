@@ -4,8 +4,8 @@ from app.schemas import StockRead, ClassificationPrediction
 from sqlalchemy.orm import sessionmaker
 
 
-async def analyze_sgp_lstm(stock: StockRead, session: SessionDep, sessionmaker: sessionmaker) -> ClassificationPrediction:
-    _trainer = SgpLSTMTrainer(session, sessionmaker)
+async def analyze_sgp_lstm(stock: StockRead, session: SessionDep, session_factory: sessionmaker) -> ClassificationPrediction:
+    _trainer = SgpLSTMTrainer(session, session_factory)
     _trainer.train()
 
     prob, label = _trainer.predict(stock)
