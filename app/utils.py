@@ -6,14 +6,13 @@ from fastapi import HTTPException
 from sqlalchemy import select, asc, cast, Numeric, desc
 from sqlalchemy.orm import aliased
 import numpy as np
+
 setattr(np, "NaN", np.nan)
 import pandas_ta as ta
 from app.api.deps import SessionDep
 from app.logger import logger
 from app.models import Chart, Stock, StockMetric, StockProfile
 from app.schemas import StockPerformanceRead, ChartRead, StockRead
-from financial_mathematics.average_directional_index import calculate_adx
-from financial_mathematics.relative_strength_index import calculate_relative_strength
 
 
 def parse_date(date_str):
@@ -121,7 +120,8 @@ def process_charts_from_alphavantage(session: SessionDep, chart_data: dict, time
     return stock
 
 
-def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead, session: SessionDep) -> StockRead | StockPerformanceRead:
+def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead,
+                                   session: SessionDep) -> StockRead | StockPerformanceRead:
     if len(stock.charts) < 28:
         raise ValueError(
             f"Not enough chart data for symbol '{stock.symbol}' to compute indicators. Need at least 14 data points."
@@ -185,8 +185,10 @@ def calculate_technical_stock_data(stock: StockRead | StockPerformanceRead, sess
     session.query(Chart).filter(Chart.symbol == stock.symbol).delete()
 
     session.add_all(chart_objects)
+    logger.info(f"Calculated technicals for stock: {stock.symbol}")
 
     return stock
+
 
 def process_stock_metadata_from_alphavantage(session: SessionDep, stock_data: dict):
     symbol = stock_data.get("Symbol")

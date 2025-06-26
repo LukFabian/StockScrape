@@ -8,6 +8,7 @@ from app.api.deps import db_manager
 from app.api.main import api_router
 from app.api.routes.stock import put_stock
 from app.core.config import settings
+from app.logger import logger
 from app.models import Stock
 
 
@@ -25,7 +26,12 @@ async def lifespan(app: FastAPI):
         )
         result = session.execute(stmt).scalars().all()
         for symbol in result:
-            await put_stock(session, symbol, time_frame="DAILY")
+            try:
+                await put_stock(session, symbol, time_frame="DAILY")
+            except ValueError as e:
+                logger.warning(e)
+                break
+
     yield
 
 
