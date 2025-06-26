@@ -197,7 +197,7 @@ def create_lstm_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 15):
         X_seq.append(X[i - seq_len:i])
         y_seq.append(y[i])
 
-    return np.array(X_seq), np.array(y_seq)
+    return np.array(X_seq, dtype="float32"), np.array(y_seq, dtype="float32")
 
 
 def split_dataset(X, y, train_frac=0.7, val_frac=0.15):
