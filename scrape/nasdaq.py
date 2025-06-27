@@ -4,9 +4,6 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import requests
 import pathlib
-# BDay is business day, not birthday
-from pandas.tseries.offsets import BDay
-from sqlalchemy import select
 
 from app.api.deps import SessionDep
 from app.models import Stock, Chart, BalanceSheet
@@ -90,144 +87,123 @@ class Scraper:
         return self.symbols_data
 
     def get_stock_and_charts(self) -> list[str]:
-        scraped_symbols = []
+        scraped = []
+
         if not self.symbols_data:
             self.get_symbols()
 
         for symbol_list in self.symbols_data:
-            for symbol_dict in symbol_list:
-                symbol = symbol_dict.get("s")
-                # Check if today's chart already exists
-                existing_stock = self.session.get(Stock, symbol)
-                if existing_stock and any(
-                        chart.date == (datetime.now().date() - BDay(1)).date() for chart in existing_stock.charts):
-                    logger.info(f"Skipping update for {symbol} — already up to date.")
+            for sym_d in symbol_list:
+                symbol = sym_d.get("s")
+
+                # 1. Fetch BS JSON (but don't insert yet)
+                time.sleep(random.randint(2, 4))
+                bs_payload = (
+                    requests.get(self.balance_sheet_url.format(symbol), headers=self.headers)
+                    .json()
+                    .get("data")
+                )
+                if not bs_payload or not bs_payload.get("incomeStatementTable"):
+                    logger.info(f"Skipping {symbol} — no balance-sheet data.")
                     continue
-                url = self.chart_url.format(symbol, (datetime.now() - relativedelta(years=5)).date(),
-                                            datetime.now().date())
-                time.sleep(random.randint(3, 5))
-                data = requests.get(url, headers=self.headers).json().get("data")
-                print(data)
-                if data and data.get("tradesTable"):
-                    logger.info(
-                        f"Received chart data: {len(data['tradesTable']['rows'])} for stock with symbol: {symbol}")
-                    self.insert_stock_and_chart_data(data)
-                    scraped_symbols.append(symbol)
-                else:
-                    logger.warning(f"No data received for {symbol} with url: {url}")
 
-        return scraped_symbols
+                # 2. Fetch Chart JSON
+                start = (datetime.now() - relativedelta(years=5)).date()
+                end = datetime.now().date()
+                time.sleep(random.randint(2, 4))
+                res = requests.get(self.chart_url.format(symbol, start, end), headers=self.headers)
+                if res.status_code != 200:
+                    print("Bad request: ", res)
+                    continue
+                chart_payload = (
+                    res.json().get("data")
+                )
+                if not chart_payload or not chart_payload.get("tradesTable"):
+                    logger.warning(f"Skipping {symbol} — no chart data.")
+                    continue
 
-    def insert_stock_and_chart_data(self, data: dict):
-        symbol = data["symbol"]
-        rows = data["tradesTable"]["rows"]
-        normalize_missing_volumes(rows)
+                # 3. Insert Stock + both BS & Charts in one go
+                logger.info(f"Persisting {symbol}: balance sheets + charts")
+                self._upsert_stock_bs_and_charts(symbol, bs_payload, chart_payload)
+                scraped.append(symbol)
 
-        # Parse incoming chart data
-        incoming_charts = {
-            datetime.strptime(row["date"], "%m/%d/%Y").date(): Chart(
-                symbol=symbol,
-                date=datetime.strptime(row["date"], "%m/%d/%Y").date(),
-                open=parse_price(row["open"]),
-                close=parse_price(row["close"]),
-                high=parse_price(row["high"]),
-                low=parse_price(row["low"]),
-                volume=parse_volume(row["volume"])
-            )
-            for row in rows
-        }
+        return scraped
 
+    def _upsert_stock_bs_and_charts(self, symbol: str, bs_data: dict, chart_data: dict):
+        """Atomically create/update Stock, its BalanceSheets, and its Charts."""
+
+        # --- 1) Ensure Stock exists ---
         stock = self.session.get(Stock, symbol)
         if stock is None:
-            # Create new stock and assign all charts
             stock = Stock(symbol=symbol, last_modified=datetime.now())
             self.session.add(stock)
-            self.session.flush()  # Make sure stock.id is available if needed
+            # flush so that foreign-key relationships can be established
+            self.session.flush()
 
-        # Fetch all existing charts for the symbol at once (efficient)
-        existing_charts = {
-            chart.date: chart for chart in self.session.query(Chart)
-            .filter_by(symbol=symbol)
-            .filter(Chart.date.in_(incoming_charts.keys()))
-            .all()
-        }
-
-        for date, new_chart in incoming_charts.items():
-            if date in existing_charts:
-                # Update existing chart
-                existing = existing_charts[date]
-                existing.open = new_chart.open
-                existing.close = new_chart.close
-                existing.high = new_chart.high
-                existing.low = new_chart.low
-                existing.volume = new_chart.volume
-            else:
-                # Insert new chart
-                self.session.add(new_chart)
-
-        stock.last_modified = datetime.now()
-        self.session.commit()
-
-    def get_balance_sheets(self) -> list[str]:
-        scraped_sheet_symbols = []
-        symbols = self.session.execute(select(Stock.symbol)).scalars().all()
-        for symbol in symbols:
-            url = self.balance_sheet_url.format("AAPL")
-            time.sleep(random.randint(3, 5))
-            data = requests.get(url, headers=self.headers).json().get("data")
-            print(data)
-            if data and data.get("incomeStatementTable"):
-                logger.info(
-                    f"Received balance sheet data: {len(data['incomeStatementTable']['rows'])} for stock with symbol: {symbol}")
-                self.insert_balance_sheet_data(data)
-                scraped_sheet_symbols.append(symbol)
-            else:
-                logger.warning(f"No data received for {symbol} with url: {url}")
-            break
-        return scraped_sheet_symbols
-
-    def insert_balance_sheet_data(self, data: dict):
-        """
-        `data` should be the value of parsed_json["data"], containing keys:
-          - "symbol": str
-          - "balanceSheetTable": { "headers": {...}, "rows": [...] }
-        """
-        symbol = data["symbol"]
-        bs_table = data["balanceSheetTable"]
+        # --- 2) Build BalanceSheet objects in memory ---
+        bs_table = bs_data["balanceSheetTable"]
         headers = bs_table["headers"]
-
-        # pull out all period-ending dates in order (value2, value3, …)
-        # note: headers["value1"] is the label "Period Ending:", skip that
         period_keys = sorted(k for k in headers if k.startswith("value") and k != "value1")
-        # e.g. ["value2", "value3", …]
-        period_dates = [
-            datetime.strptime(headers[k], "%m/%d/%Y").date()
-            for k in period_keys
-        ]
+        period_dates = list()
+        for k in period_keys:
+            try:
+                period_dates.append(datetime.strptime(headers[k], "%m/%d/%Y").date())
+            except ValueError:
+                continue
 
-        # for each period, start with the base dict
-        records = [
+        # start a list of dicts, then turn into models
+        bs_records = [
             {"symbol": symbol, "period_ending": d}
             for d in period_dates
         ]
-
-        # walk every row, map its label to our field name, and fill each period
         for row in bs_table["rows"]:
             label = row["value1"].strip()
             if label not in _BALANCE_SHEET_MAPPINGS:
-                # skip headers like "Current Assets", "Long-Term Assets", etc.
                 continue
-
             field = _BALANCE_SHEET_MAPPINGS[label]
-            # for each period column, parse and assign
-            for idx, key in enumerate(period_keys):
-                raw = row.get(key, "")
-                records[idx][field] = parse_price(raw)
+            for idx, key in enumerate(period_dates):
+                bs_records[idx][field] = parse_price(row.get(key, ""))
 
-        # bulk insert all periods
-        for rec in records:
-            bs = BalanceSheet(**rec)
+        bs_objs = [BalanceSheet(**rec) for rec in bs_records]
+
+        # --- 3) Upsert Charts similarly ---
+        rows = chart_data["tradesTable"]["rows"]
+        normalize_missing_volumes(rows)
+
+        incoming_charts = {
+            datetime.strptime(r["date"], "%m/%d/%Y").date(): Chart(
+                symbol=symbol,
+                date=datetime.strptime(r["date"], "%m/%d/%Y").date(),
+                open=parse_price(r["open"]),
+                close=parse_price(r["close"]),
+                high=parse_price(r["high"]),
+                low=parse_price(r["low"]),
+                volume=parse_volume(r["volume"]),
+            )
+            for r in rows
+        }
+        existing_charts = {
+            c.date: c for c in (
+                self.session.query(Chart)
+                .filter_by(symbol=symbol)
+                .filter(Chart.date.in_(incoming_charts.keys()))
+                .all()
+            )
+        }
+
+        for bs in bs_objs:
             self.session.add(bs)
 
-        # finally, commit (or flush, if you manage transaction outside)
+        for dt, new_chart in incoming_charts.items():
+            if dt in existing_charts:
+                old = existing_charts[dt]
+                old.open, old.high, old.low, old.close, old.volume = (
+                    new_chart.open, new_chart.high, new_chart.low,
+                    new_chart.close, new_chart.volume
+                )
+            else:
+                self.session.add(new_chart)
+
+        # --- 5) Finalize Stock & commit ---
+        stock.last_modified = datetime.now()
         self.session.commit()
