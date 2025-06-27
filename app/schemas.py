@@ -1,5 +1,5 @@
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel
 
 
@@ -109,3 +109,39 @@ class StockPerformanceRead(StockRead):
 class ClassificationPrediction(BaseModel):
     label: int
     probability: float
+
+
+class BalanceSheetBase(BaseModel):
+    symbol: str
+    period_ending: date
+    cash_and_cash_equivalents: Optional[int]
+    short_term_investments: Optional[int]
+    net_receivables: Optional[int]
+    inventory: Optional[int]
+    other_current_assets: Optional[int]
+    total_current_assets: Optional[int]
+    fixed_assets: Optional[int]
+    goodwill: Optional[int]
+    intangible_assets: Optional[int]
+    other_assets: Optional[int]
+    deferred_asset_charges: Optional[int]
+    total_assets: Optional[int]
+    accounts_payable: Optional[int]
+    short_term_debt: Optional[int]
+    other_current_liabilities: Optional[int]
+    total_current_liabilities: Optional[int]
+    long_term_debt: Optional[int]
+    other_liabilities: Optional[int]
+    deferred_liability_charges: Optional[int]
+    misc_stocks: Optional[int]
+    minority_interest: Optional[int]
+    total_liabilities: Optional[int]
+    common_stocks: Optional[int]
+    capital_surplus: Optional[int]
+    treasury_stock: Optional[int]
+    other_equity: Optional[int]
+    total_equity: Optional[int]
+    total_liabilities_and_equity: Optional[int]
+
+    class Config:
+        from_attributes = True

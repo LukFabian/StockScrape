@@ -90,10 +90,10 @@ def normalize(stock: Stock) -> Stock:
 
     # 6) Forward‐fill indicators, then fill any remaining NaN with defaults
     defaults = {
-        "adx_14": 0.0,      "adx_120": 0.0,
+        "adx_14": 0.0, "adx_120": 0.0,
         "dmi_plus_14": 0.0, "dmi_minus_14": 0.0,
-        "dmi_plus_120": 0.0,"dmi_minus_120": 0.0,
-        "rsi_14": 50.0,     "rsi_120": 50.0,
+        "dmi_plus_120": 0.0, "dmi_minus_120": 0.0,
+        "rsi_14": 50.0, "rsi_120": 50.0,
     }
     for col, default in defaults.items():
         df[col] = df[col].ffill().fillna(default)
@@ -133,6 +133,7 @@ def normalize(stock: Stock) -> Stock:
 
     return stock
 
+
 def normalize_if_needed(session_factory: sessionmaker, symbol: str) -> Optional[str]:
     """Loads a single Stock by symbol, normalizes if incomplete, and returns the symbol if normalized."""
     session = session_factory()
@@ -165,6 +166,7 @@ def normalize_if_needed(session_factory: sessionmaker, symbol: str) -> Optional[
     finally:
         session.close()
 
+
 def batch_normalize_all(session: SessionDep, session_factory: sessionmaker, max_workers: int = 16):
     """Normalize all stocks in parallel, up to max_workers threads."""
     # fetch all symbols up front in the main thread
@@ -181,7 +183,6 @@ def batch_normalize_all(session: SessionDep, session_factory: sessionmaker, max_
                 normalized.append(result)
     if len(normalized) > 0:
         print(f"Normalized {len(normalized)} stocks: {normalized}")
-
 
 
 def create_lstm_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 15):
@@ -296,8 +297,10 @@ class SgpLSTMTrainer:
         """
         feature_cols = [
             "close", "volume",
-            "adx_14", "dmi_plus_14",
-            "dmi_minus_14", "rsi_14"
+            "adx_14", "adx_120",
+            "dmi_plus_14", "dmi_minus_120"
+            "dmi_minus_14", "rsi_14",
+            "rsi_120", "dmi_plus_120",
         ]
 
         X_all = []
@@ -364,7 +367,7 @@ class SgpLSTMTrainer:
         X_scaled = self.scaler.fit_transform(X_train)
 
         self.cst = CustomSymbolicTransformer(
-            generations=20,
+            generations=1,
             population_size=1000,
             hall_of_fame=100,
             n_components=50,

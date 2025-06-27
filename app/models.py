@@ -1,7 +1,7 @@
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import ForeignKey, String, DateTime, Integer, Float
+from sqlalchemy import ForeignKey, String, DateTime, Integer, Float, BigInteger, Date
 
 
 class Base(DeclarativeBase):
@@ -26,6 +26,12 @@ class Stock(Base):
         back_populates="stock",
         cascade="all, delete-orphan",
         order_by="StockMetric.date"
+    )
+
+    balance_sheet: Mapped[Optional["BalanceSheet"]] = relationship(
+        back_populates="stock",
+        uselist=False,
+        cascade="all, delete-orphan"
     )
 
 
@@ -127,3 +133,45 @@ class StockMetric(Base):
     ex_dividend_date: Mapped[Optional[DateTime]] = mapped_column(DateTime)
 
     stock: Mapped["Stock"] = relationship(back_populates="metrics")
+
+
+class BalanceSheet(Base):
+    __tablename__ = 'balance_sheet'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(16), ForeignKey('stock.symbol', ondelete='CASCADE'), nullable=False)
+    period_ending: Mapped[date] = mapped_column(Date, nullable=False)
+
+    cash_and_cash_equivalents: Mapped[int] = mapped_column(BigInteger)
+    short_term_investments: Mapped[int] = mapped_column(BigInteger)
+    net_receivables: Mapped[int] = mapped_column(BigInteger)
+    inventory: Mapped[int] = mapped_column(BigInteger)
+    other_current_assets: Mapped[int] = mapped_column(BigInteger)
+    total_current_assets: Mapped[int] = mapped_column(BigInteger)
+    fixed_assets: Mapped[int] = mapped_column(BigInteger)
+    goodwill: Mapped[int] = mapped_column(BigInteger)
+    intangible_assets: Mapped[int] = mapped_column(BigInteger)
+    other_assets: Mapped[int] = mapped_column(BigInteger)
+    deferred_asset_charges: Mapped[int] = mapped_column(BigInteger)
+    total_assets: Mapped[int] = mapped_column(BigInteger)
+    accounts_payable: Mapped[int] = mapped_column(BigInteger)
+    short_term_debt: Mapped[int] = mapped_column(BigInteger)
+    other_current_liabilities: Mapped[int] = mapped_column(BigInteger)
+    total_current_liabilities: Mapped[int] = mapped_column(BigInteger)
+    long_term_debt: Mapped[int] = mapped_column(BigInteger)
+    other_liabilities: Mapped[int] = mapped_column(BigInteger)
+    deferred_liability_charges: Mapped[int] = mapped_column(BigInteger)
+    misc_stocks: Mapped[int] = mapped_column(BigInteger)
+    minority_interest: Mapped[int] = mapped_column(BigInteger)
+    total_liabilities: Mapped[int] = mapped_column(BigInteger)
+    common_stocks: Mapped[int] = mapped_column(BigInteger)
+    capital_surplus: Mapped[int] = mapped_column(BigInteger)
+    treasury_stock: Mapped[int] = mapped_column(BigInteger)
+    other_equity: Mapped[int] = mapped_column(BigInteger)
+    total_equity: Mapped[int] = mapped_column(BigInteger)
+    total_liabilities_and_equity: Mapped[int] = mapped_column(BigInteger)
+
+    stock: Mapped["Stock"] = relationship(
+        back_populates="balance_sheet",
+        uselist=False,
+    )

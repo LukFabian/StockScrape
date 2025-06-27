@@ -3,7 +3,12 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
+from pyinstrument import Profiler
 from sqlalchemy import select
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.requests import Request
+from starlette.responses import Response
+
 from app.api.deps import db_manager
 from app.api.main import api_router
 from app.api.routes.stock import put_stock

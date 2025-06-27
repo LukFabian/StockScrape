@@ -6,16 +6,30 @@ import requests
 import pathlib
 # BDay is business day, not birthday
 from pandas.tseries.offsets import BDay
+from sqlalchemy import select
+
 from app.api.deps import SessionDep
-from app.models import Stock, Chart
+from app.models import Stock, Chart, BalanceSheet
 from stock_scrape_logger import logger
+from scrape.mappings import _BALANCE_SHEET_MAPPINGS
 
 file_path = pathlib.Path(__file__).parent.resolve()
 
 
-def parse_price(value: str) -> int:
-    """Convert price string like '$108.91' to integer cents."""
-    return int(float(value.replace('$', '').replace(',', '')) * 100)
+def parse_price(s: str) -> int | None:
+    """Convert strings like '$1,234,000' or '-$670,000' or '--' to int or None."""
+    if not s or s.strip() in ("--",):
+        return None
+    # strip out $ , and handle parentheses if any
+    neg = "(" in s or s.strip().startswith("-")
+    clean = s.replace("$", "").replace(",", "").replace("(", "").replace(")", "").strip()
+    try:
+        val = int(clean)
+    except ValueError:
+        # if it ever comes in as float, fallback
+        val = int(float(clean))
+    val = val * 100
+    return -val if neg else val
 
 
 def parse_volume(value: str) -> int | None:
@@ -50,7 +64,8 @@ def normalize_missing_volumes(rows: list[dict]) -> None:
 
 
 class Scraper:
-    nasdaq_url = "https://api.nasdaq.com/api/quote/{}/historical?assetclass=stocks&fromdate={}&limit=1300&offset=0&todate={}"
+    chart_url = "https://api.nasdaq.com/api/quote/{}/historical?assetclass=stocks&fromdate={}&limit=1300&offset=0&todate={}"
+    balance_sheet_url = "https://api.nasdaq.com/api/company/{}/financials?frequency=1"
     symbols_data: list[dict] | None = None
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0"
@@ -74,36 +89,36 @@ class Scraper:
         self.symbols_data = data
         return self.symbols_data
 
-    def get_stocks(self) -> list[dict]:
-        stocks = []
+    def get_stock_and_charts(self) -> list[str]:
+        scraped_symbols = []
         if not self.symbols_data:
             self.get_symbols()
 
         for symbol_list in self.symbols_data:
             for symbol_dict in symbol_list:
                 symbol = symbol_dict.get("s")
-                url = self.nasdaq_url.format(symbol, (datetime.now() - relativedelta(years=5)).date(),
-                                             datetime.now().date())
-                time.sleep(random.randint(3, 5))
-
                 # Check if today's chart already exists
                 existing_stock = self.session.get(Stock, symbol)
                 if existing_stock and any(
                         chart.date == (datetime.now().date() - BDay(1)).date() for chart in existing_stock.charts):
                     logger.info(f"Skipping update for {symbol} — already up to date.")
                     continue
+                url = self.chart_url.format(symbol, (datetime.now() - relativedelta(years=5)).date(),
+                                            datetime.now().date())
+                time.sleep(random.randint(3, 5))
                 data = requests.get(url, headers=self.headers).json().get("data")
+                print(data)
                 if data and data.get("tradesTable"):
                     logger.info(
-                        f"Received stock data: {len(data['tradesTable']['rows'])} for stock with symbol: {symbol}")
-                    self.insert_stock_data(data)
-                    stocks.append({"symbol": symbol})
+                        f"Received chart data: {len(data['tradesTable']['rows'])} for stock with symbol: {symbol}")
+                    self.insert_stock_and_chart_data(data)
+                    scraped_symbols.append(symbol)
                 else:
                     logger.warning(f"No data received for {symbol} with url: {url}")
 
-        return stocks
+        return scraped_symbols
 
-    def insert_stock_data(self, data: dict):
+    def insert_stock_and_chart_data(self, data: dict):
         symbol = data["symbol"]
         rows = data["tradesTable"]["rows"]
         normalize_missing_volumes(rows)
@@ -151,4 +166,68 @@ class Scraper:
                 self.session.add(new_chart)
 
         stock.last_modified = datetime.now()
+        self.session.commit()
+
+    def get_balance_sheets(self) -> list[str]:
+        scraped_sheet_symbols = []
+        symbols = self.session.execute(select(Stock.symbol)).scalars().all()
+        for symbol in symbols:
+            url = self.balance_sheet_url.format("AAPL")
+            time.sleep(random.randint(3, 5))
+            data = requests.get(url, headers=self.headers).json().get("data")
+            print(data)
+            if data and data.get("incomeStatementTable"):
+                logger.info(
+                    f"Received balance sheet data: {len(data['incomeStatementTable']['rows'])} for stock with symbol: {symbol}")
+                self.insert_balance_sheet_data(data)
+                scraped_sheet_symbols.append(symbol)
+            else:
+                logger.warning(f"No data received for {symbol} with url: {url}")
+            break
+        return scraped_sheet_symbols
+
+    def insert_balance_sheet_data(self, data: dict):
+        """
+        `data` should be the value of parsed_json["data"], containing keys:
+          - "symbol": str
+          - "balanceSheetTable": { "headers": {...}, "rows": [...] }
+        """
+        symbol = data["symbol"]
+        bs_table = data["balanceSheetTable"]
+        headers = bs_table["headers"]
+
+        # pull out all period-ending dates in order (value2, value3, …)
+        # note: headers["value1"] is the label "Period Ending:", skip that
+        period_keys = sorted(k for k in headers if k.startswith("value") and k != "value1")
+        # e.g. ["value2", "value3", …]
+        period_dates = [
+            datetime.strptime(headers[k], "%m/%d/%Y").date()
+            for k in period_keys
+        ]
+
+        # for each period, start with the base dict
+        records = [
+            {"symbol": symbol, "period_ending": d}
+            for d in period_dates
+        ]
+
+        # walk every row, map its label to our field name, and fill each period
+        for row in bs_table["rows"]:
+            label = row["value1"].strip()
+            if label not in _BALANCE_SHEET_MAPPINGS:
+                # skip headers like "Current Assets", "Long-Term Assets", etc.
+                continue
+
+            field = _BALANCE_SHEET_MAPPINGS[label]
+            # for each period column, parse and assign
+            for idx, key in enumerate(period_keys):
+                raw = row.get(key, "")
+                records[idx][field] = parse_price(raw)
+
+        # bulk insert all periods
+        for rec in records:
+            bs = BalanceSheet(**rec)
+            self.session.add(bs)
+
+        # finally, commit (or flush, if you manage transaction outside)
         self.session.commit()
