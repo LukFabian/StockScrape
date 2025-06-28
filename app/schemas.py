@@ -91,26 +91,6 @@ class StockMetricRead(BaseModel):
     class Config:
         from_attributes = True
 
-
-class StockRead(BaseModel):
-    symbol: str
-    last_modified: datetime = datetime.now().date()
-    charts: List[ChartRead] = []
-    profile: Optional[StockProfileRead] = None
-    metrics: List[StockMetricRead] = []
-
-    class Config:
-        from_attributes = True
-
-
-class StockPerformanceRead(StockRead):
-    performance: float
-
-class ClassificationPrediction(BaseModel):
-    label: int
-    probability: float
-
-
 class BalanceSheetBase(BaseModel):
     symbol: str
     period_ending: date
@@ -145,3 +125,22 @@ class BalanceSheetBase(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class StockRead(BaseModel):
+    symbol: str
+    last_modified: datetime = datetime.now().date()
+    charts: List[ChartRead] = []
+    balance_sheets: List[BalanceSheetBase] = []
+
+    class Config:
+        from_attributes = True
+
+
+class StockPerformanceRead(StockRead):
+    performance: float
+
+class ClassificationPrediction(BaseModel):
+    label: int
+    probability: float
+

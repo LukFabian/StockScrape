@@ -144,26 +144,33 @@ class Scraper:
         bs_table = bs_data["balanceSheetTable"]
         headers = bs_table["headers"]
         period_keys = sorted(k for k in headers if k.startswith("value") and k != "value1")
-        period_dates = list()
-        for k in period_keys:
-            try:
-                period_dates.append(datetime.strptime(headers[k], "%m/%d/%Y").date())
-            except ValueError:
-                continue
 
-        # start a list of dicts, then turn into models
+        period_dates = []
+        for key in period_keys:
+            try:
+                d = datetime.strptime(headers[key], "%m/%d/%Y").date()
+            except ValueError:
+                # skip if header isn't a date
+                continue
+            period_dates.append((key, d))
+
+        # step B: start a list of dicts (one per date)
         bs_records = [
             {"symbol": symbol, "period_ending": d}
-            for d in period_dates
+            for _, d in period_dates
         ]
+
+        # step C: iterate rows, map labels → field names, then fill each date’s slot
         for row in bs_table["rows"]:
             label = row["value1"].strip()
             if label not in _BALANCE_SHEET_MAPPINGS:
                 continue
             field = _BALANCE_SHEET_MAPPINGS[label]
-            for idx, key in enumerate(period_dates):
-                bs_records[idx][field] = parse_price(row.get(key, ""))
+            for idx, (hdr_key, _) in enumerate(period_dates):
+                raw = row.get(hdr_key, "")
+                bs_records[idx][field] = parse_price(raw)
 
+        # now turn into ORM objects
         bs_objs = [BalanceSheet(**rec) for rec in bs_records]
 
         # --- 3) Upsert Charts similarly ---

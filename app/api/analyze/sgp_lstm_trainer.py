@@ -23,6 +23,49 @@ from app.models import Stock, Chart
 from app.schemas import StockRead
 
 
+def build_feature_df(stock: Stock | StockRead) -> pd.DataFrame:
+    df_chart = pd.DataFrame([
+        {
+            "symbol": c.symbol,
+            "date": c.date,
+            **{col: getattr(c, col, None) for col in chart_cols}
+        }
+        for c in stock.charts
+    ])
+
+    df_balance_sheet = pd.DataFrame([
+        {
+            "symbol": c.symbol,
+            "period_ending": c.period_ending,
+            **{col: getattr(c, col, None) for col in balance_sheet_cols}
+        }
+        for c in stock.balance_sheets
+    ])
+
+    df_chart["date"] = pd.to_datetime(df_chart["date"])
+    df_balance_sheet["period_ending"] = pd.to_datetime(df_balance_sheet["period_ending"])
+
+    df_chart["date"] = df_chart["date"].dt.tz_localize(None)
+    df_balance_sheet["period_ending"] = df_balance_sheet["period_ending"].dt.tz_localize(None)
+
+    # Sort both DataFrames by symbol and date (required for merge_asof)
+    df_chart_sorted = df_chart.sort_values(["symbol", "date"])
+    df_bs_sorted = df_balance_sheet.sort_values(["symbol", "period_ending"])
+
+    # Perform the asof merge
+    df = pd.merge_asof(
+        df_chart_sorted,
+        df_bs_sorted,
+        by="symbol",
+        left_on="date",
+        right_on="period_ending",
+        direction="backward"
+    )
+
+    df = df.dropna(axis=0)
+    return df
+
+
 def apply_rolling_features(x_sgp: np.ndarray, windows=(3, 5, 10, 20)):
     """
     Applies rolling window transformations to each SGP feature.
@@ -171,22 +214,7 @@ class SgpLSTMTrainer:
             if not stock or not stock.charts:
                 continue
 
-            df_chart = pd.DataFrame([
-                {
-                    "date": c.date,
-                    **{col: getattr(c, col, None) for col in chart_cols}
-                }
-                for c in stock.charts
-            ])
-
-            df_balance_sheet = pd.DataFrame([
-                {
-                    **{col: getattr(c, col, None) for col in balance_sheet_cols}
-                }
-                for c in stock.balance_sheets
-            ])
-
-            df = pd.merge(df_chart, df_balance_sheet, on="date")
+            df = build_feature_df(stock)
 
             if df.empty:
                 continue
@@ -229,7 +257,7 @@ class SgpLSTMTrainer:
         X_scaled = self.scaler.fit_transform(X_train)
 
         self.cst = CustomSymbolicTransformer(
-            generations=1,
+            generations=10,
             population_size=1000,
             hall_of_fame=100,
             n_components=50,
@@ -262,15 +290,7 @@ class SgpLSTMTrainer:
         if not self.trained or self.model is None or self.cst is None:
             raise RuntimeError("Model is not trained. Call `train()` first.")
 
-        df = pd.DataFrame([
-            {
-                "date": c.date,
-                **{col: getattr(c, col) for col in chart_cols + balance_sheet_cols}
-            }
-            for c in stock.charts
-        ])
-
-        df = df.dropna()
+        df = build_feature_df(stock)
         if df.empty or len(df) < seq_len:
             raise ValueError("Insufficient data to make a prediction.")
 
