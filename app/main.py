@@ -39,6 +39,20 @@ async def lifespan(app: FastAPI):
 
     yield
 
+class PyInstrumentMiddleWare(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        profiler = Profiler(interval=0.001, async_mode="enabled")
+        profiler.start()
+        try:
+            response = await call_next(request)
+            profiler.stop()
+            # Write result to html file
+            profiler.write_html("profile.html")
+            return response
+        finally:
+            profiler.stop()
+            # Write result to html file
+            profiler.write_html("profile.html")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -46,6 +60,8 @@ app = FastAPI(
     generate_unique_id_function=custom_generate_unique_id,
     lifespan=lifespan
 )
+
+#app.add_middleware(PyInstrumentMiddleWare)
 
 origins = [
     "http://localhost:3000",  # Vite dev server

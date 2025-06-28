@@ -1,9 +1,8 @@
 import asyncio
 from concurrent.futures import as_completed
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
 from datetime import datetime
-from typing import Tuple, List, Optional
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -14,6 +13,7 @@ from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.preprocessing import StandardScaler
 from sqlalchemy import select, or_
 
+from app.api.analyze.normalization import batch_normalize_all, chart_cols, balance_sheet_cols
 from app.api.analyze.symbolic_transformer import CustomSymbolicTransformer
 from app.api.deps import SessionDep
 from sqlalchemy.orm import sessionmaker, selectinload
@@ -27,7 +27,6 @@ def apply_rolling_features(x_sgp: np.ndarray, windows=(3, 5, 10, 20)):
     """
     Applies rolling window transformations to each SGP feature.
     """
-    import pandas as pd
     features = []
     for w in windows:
         rolled = pd.DataFrame(x_sgp).rolling(window=w, min_periods=1).mean().values
@@ -41,148 +40,6 @@ def _safe_div(x1, x2):
     mask = np.abs(x2) > 1e-6
     result[mask] = np.divide(x1[mask], x2[mask])
     return result
-
-
-def normalize(stock: Stock) -> Stock:
-    """
-    Given a Stock with irregular Chart dates (e.g. skipping weekends/holidays),
-    return a new Stock whose .charts cover every business day in the span,
-    forward-filling prices/indicators and zeroing out volume on non-trading days.
-    This mutates the stock.charts relationship in-place.
-    """
-    # 1) Work on a deep copy so if you need the original you still have it
-    stock = deepcopy(stock)
-
-    # 2) Build a DataFrame from existing charts
-    df = pd.DataFrame([
-        {
-            "date": c.date,
-            "open": c.open,
-            "high": c.high,
-            "low": c.low,
-            "close": c.close,
-            "volume": c.volume,
-            "adx_14": c.adx_14,
-            "adx_120": c.adx_120,
-            "dmi_plus_14": c.dmi_plus_14,
-            "dmi_minus_14": c.dmi_minus_14,
-            "dmi_plus_120": c.dmi_plus_120,
-            "dmi_minus_120": c.dmi_minus_120,
-            "rsi_14": c.rsi_14,
-            "rsi_120": c.rsi_120,
-        }
-        for c in stock.charts
-    ])
-    df.set_index("date", inplace=True)
-
-    # 3) Create full business‐day index
-    bdays = pd.bdate_range(start=df.index.min(), end=df.index.max())
-
-    # 4) Reindex to include every business day
-    df = df.reindex(bdays)
-
-    # 5) Fill symbol (constant), forward‐fill/zero‐fill columns
-    df["symbol"] = stock.symbol
-    df["close"] = df["close"].ffill()
-    for col in ("open", "high", "low"):
-        df[col] = df[col].fillna(df["close"])
-    df["volume"] = df["volume"].fillna(0.0)
-
-    # 6) Forward‐fill indicators, then fill any remaining NaN with defaults
-    defaults = {
-        "adx_14": 0.0, "adx_120": 0.0,
-        "dmi_plus_14": 0.0, "dmi_minus_14": 0.0,
-        "dmi_plus_120": 0.0, "dmi_minus_120": 0.0,
-        "rsi_14": 50.0, "rsi_120": 50.0,
-    }
-    for col, default in defaults.items():
-        df[col] = df[col].ffill().fillna(default)
-
-    # 7) (Optional) Sanity check
-    if df.isna().any().any():
-        raise ValueError("normalize(): NaNs remain after filling!")
-
-    # 8) Write back into stock.charts
-    #    First clear existing list (SQLAlchemy will DELETE-orphan on flush if you persist)
-    stock.charts.clear()
-
-    #    Then create a Chart for each row
-    for idx, row in df.iterrows():
-        stock.charts.append(
-            Chart(
-                date=idx.to_pydatetime(),
-                symbol=stock.symbol,
-                open=int(row["open"]),
-                high=int(row["high"]),
-                low=int(row["low"]),
-                close=int(row["close"]),
-                volume=int(row["volume"]),
-                adx_14=float(row["adx_14"]),
-                adx_120=float(row["adx_120"]),
-                dmi_plus_14=float(row["dmi_plus_14"]),
-                dmi_minus_14=float(row["dmi_minus_14"]),
-                dmi_plus_120=float(row["dmi_plus_120"]),
-                dmi_minus_120=float(row["dmi_minus_120"]),
-                rsi_14=float(row["rsi_14"]),
-                rsi_120=float(row["rsi_120"]),
-            )
-        )
-
-    # 9) Update last_modified so you know when this was normalized
-    stock.last_modified = datetime.now().date()
-
-    return stock
-
-
-def normalize_if_needed(session_factory: sessionmaker, symbol: str) -> Optional[str]:
-    """Loads a single Stock by symbol, normalizes if incomplete, and returns the symbol if normalized."""
-    session = session_factory()
-    try:
-        stock = session.execute(
-            select(Stock)
-            .options(selectinload(Stock.charts))
-            .where(Stock.symbol == symbol)
-        ).scalar_one_or_none()
-
-        if not stock or not stock.charts:
-            return None
-
-        # Check for missing business days
-        chart_dates = sorted(c.date for c in stock.charts)
-        expected = set(pd.bdate_range(chart_dates[0], chart_dates[-1]).date)
-        actual = set(chart_dates)
-
-        if len(expected - actual) > 0:
-            # missing days ⇒ normalize & merge
-            normalized = normalize(stock)
-            logger.info(f"Normalized {symbol}")
-            session.merge(normalized)
-            session.commit()
-            return symbol
-        return None
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
-
-
-def batch_normalize_all(session: SessionDep, session_factory: sessionmaker, max_workers: int = 16):
-    """Normalize all stocks in parallel, up to max_workers threads."""
-    # fetch all symbols up front in the main thread
-    symbols = session.execute(select(Stock.symbol)).scalars().all()
-    session.close()
-
-    normalized = []
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(normalize_if_needed, session_factory, sym): sym for sym in symbols}
-        for fut in as_completed(futures):
-            result = fut.result()
-            if result:
-                normalized.append(result)
-    if len(normalized) > 0:
-        print(f"Normalized {len(normalized)} stocks: {normalized}")
 
 
 def create_lstm_sequences(X: np.ndarray, y: np.ndarray, seq_len: int = 15):
@@ -236,7 +93,6 @@ class SgpLSTMTrainer:
         self.model = None
         self.scaler = StandardScaler()
         self.cst = None
-        self.feature_cols = None
         self.trained = False
         self.sessionmaker = sessionmaker
 
@@ -286,49 +142,54 @@ class SgpLSTMTrainer:
             for future in as_completed(futures):
                 future.result()
 
-    def prepare_training_data(self, window: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray, List[str]]:
+    def prepare_training_data(self, window: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Prepares training data from all loaded and normalized StockRead instances.
+        Prepares training data from all loaded and normalized Stock instances.
         Returns:
             X         -> Combined feature matrix
-            y_binary  -> Binary classification labels
-            y_return  -> Future return values
-            feature_names -> Names of base features
+            y_binary  -> Binary classification labels (1 if return > median, else 0)
+            y_return  -> Raw future return values
         """
-        feature_cols = [
-            "close", "volume",
-            "adx_14", "adx_120",
-            "dmi_plus_14", "dmi_minus_120"
-            "dmi_minus_14", "rsi_14",
-            "rsi_120", "dmi_plus_120",
-        ]
 
         X_all = []
         y_binary_all = []
         y_return_all = []
+
+        # Normalize all stocks before building training data
         batch_normalize_all(self.session, self.sessionmaker, max_workers=8)
+
         stock_symbols = self.session.execute(select(Stock.symbol)).scalars().all()
 
         for symbol in stock_symbols:
-            # Load one stock and its charts on-demand
             stock = self.session.execute(
                 select(Stock)
                 .options(selectinload(Stock.charts))
+                .options(selectinload(Stock.balance_sheets))
                 .where(Stock.symbol == symbol)
             ).scalar_one_or_none()
 
             if not stock or not stock.charts:
                 continue
 
-            df = pd.DataFrame([{
-                "date": c.date,
-                "close": c.close,
-                "volume": c.volume,
-                "adx_14": c.adx_14,
-                "dmi_plus_14": c.dmi_plus_14,
-                "dmi_minus_14": c.dmi_minus_14,
-                "rsi_14": c.rsi_14,
-            } for c in stock.charts])
+            df_chart = pd.DataFrame([
+                {
+                    "date": c.date,
+                    **{col: getattr(c, col, None) for col in chart_cols}
+                }
+                for c in stock.charts
+            ])
+
+            df_balance_sheet = pd.DataFrame([
+                {
+                    **{col: getattr(c, col, None) for col in balance_sheet_cols}
+                }
+                for c in stock.balance_sheets
+            ])
+
+            df = pd.merge(df_chart, df_balance_sheet, on="date")
+
+            if df.empty:
+                continue
 
             df.set_index("date", inplace=True)
             df.sort_index(inplace=True)
@@ -336,6 +197,7 @@ class SgpLSTMTrainer:
             if df.shape[0] <= window:
                 continue
 
+            # Compute future return and binary classification label
             df["future_close"] = df["close"].shift(-window)
             df["future_return"] = (df["future_close"] - df["close"]) / df["close"]
             df.dropna(subset=["future_return"], inplace=True)
@@ -345,9 +207,9 @@ class SgpLSTMTrainer:
 
             median_return = df["future_return"].median()
             df["label"] = (df["future_return"] > median_return).astype(int)
-            df = df.dropna(axis=0)
 
-            X_all.append(df[feature_cols].values)
+            # Append feature matrix and labels
+            X_all.append(df[chart_cols + balance_sheet_cols].values)
             y_binary_all.append(df["label"].values)
             y_return_all.append(df["future_return"].values)
 
@@ -358,11 +220,11 @@ class SgpLSTMTrainer:
         y_binary = np.concatenate(y_binary_all)
         y_return = np.concatenate(y_return_all)
 
-        return X, y_binary, y_return, feature_cols
+        return X, y_binary, y_return
 
     def train(self, window: int = 5, seq_len: int = 15):
         self.load_features()
-        X_train, y_binary, y_return, self.feature_cols = self.prepare_training_data(window=window)
+        X_train, y_binary, y_return = self.prepare_training_data(window=window)
 
         X_scaled = self.scaler.fit_transform(X_train)
 
@@ -400,20 +262,19 @@ class SgpLSTMTrainer:
         if not self.trained or self.model is None or self.cst is None:
             raise RuntimeError("Model is not trained. Call `train()` first.")
 
-        df = pd.DataFrame([{
-            "close": c.close,
-            "volume": c.volume,
-            "adx_14": c.adx_14,
-            "dmi_plus_14": c.dmi_plus_14,
-            "dmi_minus_14": c.dmi_minus_14,
-            "rsi_14": c.rsi_14,
-        } for c in stock.charts])
+        df = pd.DataFrame([
+            {
+                "date": c.date,
+                **{col: getattr(c, col) for col in chart_cols + balance_sheet_cols}
+            }
+            for c in stock.charts
+        ])
 
         df = df.dropna()
         if df.empty or len(df) < seq_len:
             raise ValueError("Insufficient data to make a prediction.")
 
-        X_input = self.scaler.transform(df[self.feature_cols].values)
+        X_input = self.scaler.transform(df[chart_cols + balance_sheet_cols].values)
         X_sgp = self.cst.transform(X_input)
         X_sgp_rolled = apply_rolling_features(X_sgp)
         X_seq, _ = create_lstm_sequences(X_sgp_rolled, np.zeros(len(X_sgp_rolled)), seq_len=seq_len)

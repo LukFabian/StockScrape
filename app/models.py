@@ -28,10 +28,10 @@ class Stock(Base):
         order_by="StockMetric.date"
     )
 
-    balance_sheet: Mapped[Optional["BalanceSheet"]] = relationship(
+    balance_sheets: Mapped[List["BalanceSheet"]] = relationship(
         back_populates="stock",
-        uselist=False,
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        order_by="BalanceSheet.period_ending"
     )
 
 
@@ -172,6 +172,5 @@ class BalanceSheet(Base):
     total_liabilities_and_equity: Mapped[int] = mapped_column(BigInteger)
 
     stock: Mapped["Stock"] = relationship(
-        back_populates="balance_sheet",
-        uselist=False,
+        back_populates="balance_sheets"
     )
