@@ -37,6 +37,9 @@ def parse_int(value):
     except (TypeError, ValueError):
         return None
 
+def flatten(xss):
+    return [x for xs in xss for x in xs]
+
 
 def process_charts_from_alphavantage(session: SessionDep, chart_data: dict, time_frame: str) -> Stock | None:
     if chart_data.get('Error Message'):

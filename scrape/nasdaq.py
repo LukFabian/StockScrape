@@ -5,8 +5,11 @@ from dateutil.relativedelta import relativedelta
 import requests
 import pathlib
 
+from sqlalchemy import select
+
 from app.api.deps import SessionDep
 from app.models import Stock, Chart, BalanceSheet
+from app.utils import flatten
 from stock_scrape_logger import logger
 from scrape.mappings import _BALANCE_SHEET_MAPPINGS
 
@@ -72,7 +75,7 @@ class Scraper:
     def __init__(self, session: SessionDep):
         self.session = session
 
-    def get_symbols(self):
+    def get_symbols(self, skip_existing_symbols: bool = True) -> list[dict]:
         urls = list()
         for i in range(1, 3):
             urls.append(
@@ -83,6 +86,15 @@ class Scraper:
             time.sleep(random.randint(1, 3))
             json_resp = requests.get(url, headers=self.headers).json()
             data.append(json_resp.get("data").get("data"))
+        data = flatten(data)
+        if skip_existing_symbols:
+            symbols = self.session.execute(select(Stock.symbol)).scalars().all()
+            filtered_data = list()
+            for i, symbol_dict in enumerate(data):
+                symbol = symbol_dict["s"]
+                if symbol not in symbols:
+                    filtered_data.append(symbol_dict)
+            data = filtered_data
         self.symbols_data = data
         return self.symbols_data
 
@@ -92,40 +104,39 @@ class Scraper:
         if not self.symbols_data:
             self.get_symbols()
 
-        for symbol_list in self.symbols_data:
-            for sym_d in symbol_list:
-                symbol = sym_d.get("s")
+        for sym_d in self.symbols_data:
+            symbol = sym_d.get("s")
 
-                # 1. Fetch BS JSON (but don't insert yet)
-                time.sleep(random.randint(2, 4))
-                bs_payload = (
-                    requests.get(self.balance_sheet_url.format(symbol), headers=self.headers)
-                    .json()
-                    .get("data")
-                )
-                if not bs_payload or not bs_payload.get("incomeStatementTable"):
-                    logger.info(f"Skipping {symbol} — no balance-sheet data.")
-                    continue
+            # 1. Fetch BS JSON (but don't insert yet)
+            time.sleep(random.randint(2, 4))
+            bs_payload = (
+                requests.get(self.balance_sheet_url.format(symbol), headers=self.headers)
+                .json()
+                .get("data")
+            )
+            if not bs_payload or not bs_payload.get("incomeStatementTable"):
+                logger.info(f"Skipping {symbol} — no balance-sheet data.")
+                continue
 
-                # 2. Fetch Chart JSON
-                start = (datetime.now() - relativedelta(years=5)).date()
-                end = datetime.now().date()
-                time.sleep(random.randint(2, 4))
-                res = requests.get(self.chart_url.format(symbol, start, end), headers=self.headers)
-                if res.status_code != 200:
-                    print("Bad request: ", res)
-                    continue
-                chart_payload = (
-                    res.json().get("data")
-                )
-                if not chart_payload or not chart_payload.get("tradesTable"):
-                    logger.warning(f"Skipping {symbol} — no chart data.")
-                    continue
+            # 2. Fetch Chart JSON
+            start = (datetime.now() - relativedelta(years=5)).date()
+            end = datetime.now().date()
+            time.sleep(random.randint(2, 4))
+            res = requests.get(self.chart_url.format(symbol, start, end), headers=self.headers)
+            if res.status_code != 200:
+                print("Bad request: ", res)
+                continue
+            chart_payload = (
+                res.json().get("data")
+            )
+            if not chart_payload or not chart_payload.get("tradesTable"):
+                logger.warning(f"Skipping {symbol} — no chart data.")
+                continue
 
-                # 3. Insert Stock + both BS & Charts in one go
-                logger.info(f"Persisting {symbol}: balance sheets + charts")
-                self._upsert_stock_bs_and_charts(symbol, bs_payload, chart_payload)
-                scraped.append(symbol)
+            # 3. Insert Stock + both BS & Charts in one go
+            logger.info(f"Persisting {symbol}: balance sheets + charts")
+            self._upsert_stock_bs_and_charts(symbol, bs_payload, chart_payload)
+            scraped.append(symbol)
 
         return scraped
 
