@@ -166,13 +166,54 @@ class SgpLSTMTrainer:
         with sessionmaker() as session:
             if not self.stock_needs_technicals(symbol):
                 return
-            logger.info(f"Stock needs technical analysis: {symbol}")
             try:
                 asyncio.run(get_stock(session, symbol, with_technicals=True))
                 session.commit()
             except Exception as e:
                 logger.warning(f"Could not load stock {symbol}: {e}")
                 session.rollback()
+
+    def get_tf_dataset(self, window=5, seq_len=15, batch_size=64):
+        self.load_features()
+        X, y_binary, y_return = self.prepare_training_data(window=window)
+        X_scaled = self.scaler.fit_transform(X)
+
+        self.cst = CustomSymbolicTransformer(
+            generations=10,
+            population_size=1000,
+            hall_of_fame=100,
+            n_components=50,
+            function_set=function_set,
+            parsimony_coefficient=0.0005,
+            max_samples=0.9,
+            verbose=1,
+            random_state=42,
+            y_return=y_return
+        )
+        self.cst.fit(X_scaled, y_binary)
+
+        X_sgp = self.cst.transform(X_scaled)
+        X_sgp_rolled = apply_rolling_features(X_sgp)
+        X_seq, y_seq = create_lstm_sequences(X_sgp_rolled, y_binary, seq_len=seq_len)
+
+        def generator():
+            for x, y in zip(X_seq, y_seq):
+                yield x, y
+
+        # Dynamically infer shape from the first sample
+        example_x = X_seq[0]
+        output_signature = (
+            tensorflow.TensorSpec(shape=example_x.shape, dtype=tensorflow.float32),
+            tensorflow.TensorSpec(shape=(), dtype=tensorflow.float32),
+        )
+
+        dataset = tensorflow.data.Dataset.from_generator(
+            generator,
+            output_signature=output_signature
+        )
+
+        dataset = dataset.shuffle(10000).batch(batch_size).prefetch(tensorflow.data.AUTOTUNE)
+        return dataset
 
     def load_features(self, max_workers: int = 16):
         symbols = self.session.execute(select(Stock.symbol)).scalars().all()
@@ -251,38 +292,30 @@ class SgpLSTMTrainer:
         return X, y_binary, y_return
 
     def train(self, window: int = 5, seq_len: int = 15):
-        self.load_features()
-        X_train, y_binary, y_return = self.prepare_training_data(window=window)
+        dataset = self.get_tf_dataset(window=window, seq_len=seq_len)
+        dataset_size = sum(1 for _ in dataset)
+        train_size = int(0.7 * dataset_size)
+        val_size = int(0.15 * dataset_size)
 
-        X_scaled = self.scaler.fit_transform(X_train)
+        train_ds = dataset.take(train_size)
+        val_ds = dataset.skip(train_size).take(val_size)
+        test_ds = dataset.skip(train_size + val_size)
 
-        self.cst = CustomSymbolicTransformer(
-            generations=10,
-            population_size=1000,
-            hall_of_fame=100,
-            n_components=50,
-            function_set=function_set,
-            parsimony_coefficient=0.0005,
-            max_samples=0.9,
-            verbose=1,
-            random_state=42,
-            y_return=y_return
-        )
-        self.cst.fit(X_scaled, y_binary)
-        X_sgp = self.cst.transform(X_scaled)
-        X_sgp_rolled = apply_rolling_features(X_sgp)
+        # Peek one batch for shape
+        input_shape = train_ds.element_spec[0].shape[1:]
 
-        X_lstm, y_lstm = create_lstm_sequences(X_sgp_rolled, y_binary, seq_len=seq_len)
-        X_train, y_train, X_val, y_val, X_test, y_test = split_dataset(X_lstm, y_lstm)
+        self.model = build_lstm_model(input_shape=input_shape)
+        self.model.fit(train_ds, validation_data=val_ds, epochs=10)
 
-        self.model = build_lstm_model(input_shape=X_train.shape[1:])
-        self.model.fit(X_train, y_train, validation_data=(X_val, y_val), epochs=10, batch_size=64)
+        y_true, y_pred_probs = [], []
+        for x_batch, y_batch in test_ds:
+            probs = self.model.predict(x_batch).ravel()
+            y_true.extend(y_batch.numpy())
+            y_pred_probs.extend(probs)
 
-        y_pred_probs = self.model.predict(X_test).ravel()
-        y_pred_classes = (y_pred_probs > 0.5).astype(int)
-
-        print(classification_report(y_test, y_pred_classes))
-        print("ROC AUC:", roc_auc_score(y_test, y_pred_probs))
+        y_pred_classes = (np.array(y_pred_probs) > 0.5).astype(int)
+        print(classification_report(y_true, y_pred_classes))
+        print("ROC AUC:", roc_auc_score(y_true, y_pred_probs))
 
         self.trained = True
 
@@ -291,7 +324,7 @@ class SgpLSTMTrainer:
             raise RuntimeError("Model is not trained. Call `train()` first.")
 
         df = build_feature_df(stock)
-        if df.empty or len(df) < seq_len:
+        if df.empty:
             raise ValueError("Insufficient data to make a prediction.")
 
         X_input = self.scaler.transform(df[chart_cols + balance_sheet_cols].values)
